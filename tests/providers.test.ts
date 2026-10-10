@@ -270,3 +270,62 @@ test('Codex usage entries keep per-request counts beside the running total', () 
   assert.equal(usage.text, 'Usage: 5000000 input · 9000 output');
   assert.deepEqual(usage.usage, { input: 162332, output: 39 });
 });
+
+test('Codex derives subagent role from agent_path when agent_role is absent', () => {
+  const values = [
+    {
+      type: 'session_meta',
+      timestamp: '2026-10-05T04:04:05Z',
+      payload: {
+        id: 'thread-subagent-1',
+        session_id: 'session-subagent-1',
+        parent_thread_id: 'thread-root',
+        thread_source: 'subagent',
+        agent_path: '/root/milestone_ui_analysis',
+        agent_nickname: 'Pasteur',
+        agent_role: null,
+      },
+    },
+  ];
+  const observation = new CodexAdapter().inspect(values.map((value, index) => ({ value, index })), { tracePath: '/tmp/subagent.jsonl' });
+  assert(observation);
+  assert.equal(observation.agent.type, 'subagent');
+  assert.equal(observation.agent.nickname, 'Pasteur');
+  assert.equal(observation.agent.agentPath, '/root/milestone_ui_analysis');
+  assert.equal(observation.agent.role, 'Milestone UI Analysis');
+});
+
+test('Codex preserves explicit agent_role over agent_path', () => {
+  const values = [
+    {
+      type: 'session_meta',
+      timestamp: '2026-10-05T04:04:05Z',
+      payload: {
+        id: 'thread-subagent-2',
+        thread_source: 'subagent',
+        agent_path: '/root/milestone_ui_analysis',
+        agent_role: 'Custom Specialist',
+      },
+    },
+  ];
+  const observation = new CodexAdapter().inspect(values.map((value, index) => ({ value, index })), { tracePath: '/tmp/subagent-2.jsonl' });
+  assert(observation);
+  assert.equal(observation.agent.role, 'Custom Specialist');
+});
+
+test('Codex formats acronyms in derived subagent role', () => {
+  const values = [
+    {
+      type: 'session_meta',
+      timestamp: '2026-10-10T01:01:03Z',
+      payload: {
+        id: 'thread-subagent-3',
+        thread_source: 'subagent',
+        agent_path: '/root/map_ai',
+      },
+    },
+  ];
+  const observation = new CodexAdapter().inspect(values.map((value, index) => ({ value, index })), { tracePath: '/tmp/subagent-3.jsonl' });
+  assert(observation);
+  assert.equal(observation.agent.role, 'Map AI');
+});

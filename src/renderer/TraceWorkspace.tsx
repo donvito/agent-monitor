@@ -78,8 +78,15 @@ type DisclosureProps = {
   onToggle: (key: string) => void;
 };
 
+export function agentDisplayName(agent: Agent): string {
+  if (agent.type === 'subagent' && agent.role) {
+    return capitalize(agent.role);
+  }
+  return agent.nickname || (agent.role ? capitalize(agent.role) : undefined) || (agent.type === 'main' ? 'Main agent' : 'Subagent');
+}
+
 function titleFor(agent: Agent) {
-  return agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : 'Subagent');
+  return agentDisplayName(agent);
 }
 
 function capitalize(text: string) {
@@ -87,7 +94,7 @@ function capitalize(text: string) {
 }
 
 function subagentLabel(agent: Agent) {
-  return `${capitalize(agent.role || 'Subagent')} · ${agent.nickname || agent.id.slice(-8)}`;
+  return `${capitalize(agent.role || 'Subagent')}${agent.nickname ? ` · ${agent.nickname}` : ''}`;
 }
 
 function isoFor(timestamp: number | undefined) {

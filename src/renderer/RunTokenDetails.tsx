@@ -4,6 +4,7 @@ import type { Agent } from '../shared/types';
 import { estimateAgentCost, estimateModelCosts, PRICING_VERIFIED_AT, UNATTRIBUTED_MODEL, type ModelCostRow } from '../shared/pricing';
 import { RollingNumber, RollingText } from './RollingNumber';
 import { TokenUsageCharts } from './TokenUsageCharts';
+import { agentDisplayName } from './TraceWorkspace';
 
 const exact = (value: number) => value.toLocaleString();
 
@@ -165,7 +166,7 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
           {view === 'agent' ? <table>
             <thead><tr><th scope="col">Agent</th><th scope="col">IN</th><th scope="col">OUT</th><th scope="col" title={`API token estimate (USD). ${totalCostNote}`}>USD</th></tr></thead>
             <tbody>{rows.map(agent => <tr key={agent.id}>
-              <th scope="row" title={agent.id}><strong>{agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : `Subagent · ${agent.id.slice(-8)}`)}</strong><span>{agent.type === 'main' ? 'Main' : agent.role || 'Subagent'} · {agent.model || 'Unknown model'}</span></th>
+              <th scope="row" title={agent.id}><strong>{agentDisplayName(agent)}</strong><span>{agent.type === 'main' ? 'Main' : agent.nickname ? `${agent.nickname} · ${agent.model || 'Unknown model'}` : agent.model || 'Unknown model'}</span></th>
               <td><RollingNumber value={agent.stats.inputTokens} /></td><td><RollingNumber value={agent.stats.outputTokens} /></td><td className="token-breakdown__cost" title={costNote(costByAgentId.get(agent.id) as AgentCost)}><RollingText text={costLabel(costByAgentId.get(agent.id) as AgentCost)} /></td>
             </tr>)}</tbody>
             <tfoot><tr><th scope="row">Run total</th><td><RollingNumber value={totals.input} /></td><td><RollingNumber value={totals.output} /></td><td className="token-breakdown__cost" title={totalCostNote}><RollingText text={totalCostLabel} /></td></tr></tfoot>
