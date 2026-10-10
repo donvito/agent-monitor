@@ -133,7 +133,7 @@ test('TraceMonitor handles partial UTF-8 lines, incremental appends, nested disc
     const bytes = Buffer.from(`${text}\n`, 'utf8');
     const split = bytes.indexOf(Buffer.from('é')) + 1;
     await appendFile(childPath, bytes.subarray(0, split));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await new Promise((resolve) => setTimeout(resolve, 100));
     await appendFile(childPath, bytes.subarray(split));
     await waitFor(() => monitor.getTrace('thread-child').then((entries) => entries.some((entry) => entry.text.includes('café'))).catch(() => false));
     assert.equal((await monitor.getTrace('thread-child')).some((entry) => entry.text.includes('café')), true);
@@ -143,6 +143,7 @@ test('TraceMonitor handles partial UTF-8 lines, incremental appends, nested disc
 
     await truncate(parentPath, 0);
     await waitFor(() => !monitor.snapshot().agents.some((agent) => agent.threadId === 'thread-parent'));
+    await new Promise((resolve) => setTimeout(resolve, 100));
     await appendFile(parentPath, `${line(meta({ session_id: 'session-parent', id: 'thread-parent', thread_source: 'user' }))}${line({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'rewritten' }] } })}`);
     await waitFor(() => monitor.getTrace('thread-parent').then((entries) => entries.some((entry) => entry.text.includes('rewritten'))).catch(() => false));
     await rm(childPath);
