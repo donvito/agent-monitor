@@ -78,8 +78,15 @@ type DisclosureProps = {
   onToggle: (key: string) => void;
 };
 
+export function agentDisplayName(agent: Agent): string {
+  if (agent.type === 'subagent' && agent.role && agent.nickname) {
+    return `${capitalize(agent.role)} · ${agent.nickname}`;
+  }
+  return agent.nickname || (agent.role ? capitalize(agent.role) : undefined) || (agent.type === 'main' ? 'Main agent' : 'Subagent');
+}
+
 function titleFor(agent: Agent) {
-  return agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : 'Subagent');
+  return agentDisplayName(agent);
 }
 
 function capitalize(text: string) {

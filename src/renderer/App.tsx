@@ -58,7 +58,7 @@ import type {
 import { useDashboardStore } from './store';
 import { ThemeSelector } from './ThemeSelector';
 import { Dropdown } from './Dropdown';
-import { TraceWorkspace } from './TraceWorkspace';
+import { TraceWorkspace, agentDisplayName } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
 import './TraceTabs.css';
@@ -462,7 +462,7 @@ function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { agent, pulse, arrived, onOpenTrace } = data;
   const status = STATUS_META[agent.status];
   const StatusIcon = status.icon;
-  const displayName = agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : 'Subagent');
+  const displayName = agentDisplayName(agent);
   const model = agent.model || 'Model pending';
   const effort = agent.reasoningEffort || 'default';
   const isMain = agent.type === 'main';
@@ -862,7 +862,7 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
   if (!agent) return null;
   const status = STATUS_META[agent.status];
   const StatusIcon = status.icon;
-  const title = agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : 'Subagent');
+  const title = agentDisplayName(agent);
 
   return (
     <aside className="details-pane">
@@ -1052,8 +1052,8 @@ function App() {
         }}>
           <button type="button" role="tab" className="workspace-tab" aria-selected={!activeTraceId} aria-controls="graph-panel" onClick={() => setActiveTraceId(null)}>Graph</button>
           {traceTabs.map(agent => <div className="workspace-tab-group" data-active={agent.id === activeTraceId} key={agent.id}>
-            <button type="button" role="tab" className="workspace-tab workspace-tab--trace" aria-selected={agent.id === activeTraceId} aria-controls="expanded-trace-panel" onClick={() => setActiveTraceId(agent.id)} title={agent.nickname || agent.role || 'Main agent'}>Trace · {agent.nickname || agent.role || 'Main agent'}</button>
-            <button type="button" className="workspace-tab-close" aria-label={`Close trace ${agent.nickname || agent.role || 'Main agent'}`} onClick={() => closeTrace(agent.id)}><X size={13} /></button>
+            <button type="button" role="tab" className="workspace-tab workspace-tab--trace" aria-selected={agent.id === activeTraceId} aria-controls="expanded-trace-panel" onClick={() => setActiveTraceId(agent.id)} title={agentDisplayName(agent)}>Trace · {agentDisplayName(agent)}</button>
+            <button type="button" className="workspace-tab-close" aria-label={`Close trace ${agentDisplayName(agent)}`} onClick={() => closeTrace(agent.id)}><X size={13} /></button>
           </div>)}
         </div>}
         <div id="graph-panel" className="workspace-graph-view" style={expandedAgent ? { display: 'none' } : undefined}>
