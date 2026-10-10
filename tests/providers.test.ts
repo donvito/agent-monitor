@@ -312,3 +312,20 @@ test('Codex preserves explicit agent_role over agent_path', () => {
   assert(observation);
   assert.equal(observation.agent.role, 'Custom Specialist');
 });
+
+test('Codex formats acronyms in derived subagent role', () => {
+  const values = [
+    {
+      type: 'session_meta',
+      timestamp: '2026-10-10T01:01:03Z',
+      payload: {
+        id: 'thread-subagent-3',
+        thread_source: 'subagent',
+        agent_path: '/root/map_ai',
+      },
+    },
+  ];
+  const observation = new CodexAdapter().inspect(values.map((value, index) => ({ value, index })), { tracePath: '/tmp/subagent-3.jsonl' });
+  assert(observation);
+  assert.equal(observation.agent.role, 'Map AI');
+});

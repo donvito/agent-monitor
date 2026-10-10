@@ -274,7 +274,8 @@ export function roleFromAgentPath(agentPath: string | undefined): string | undef
     .replace(/\bUi\b/g, 'UI')
     .replace(/\bApi\b/g, 'API')
     .replace(/\bPr\b/g, 'PR')
-    .replace(/\bDb\b/g, 'DB');
+    .replace(/\bDb\b/g, 'DB')
+    .replace(/\bAi\b/g, 'AI');
 }
 
 /**
