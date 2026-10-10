@@ -262,6 +262,21 @@ function traceType(threadSource: string | undefined): AgentType {
   return 'unknown';
 }
 
+export function roleFromAgentPath(agentPath: string | undefined): string | undefined {
+  if (!agentPath) return undefined;
+  const trimmed = agentPath.trim().replace(/\/+$/, '');
+  const segments = trimmed.split('/').filter(Boolean);
+  const last = segments.at(-1);
+  if (!last || last === 'root' || last === 'main') return undefined;
+  return last
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/\bUi\b/g, 'UI')
+    .replace(/\bApi\b/g, 'API')
+    .replace(/\bPr\b/g, 'PR')
+    .replace(/\bDb\b/g, 'DB');
+}
+
 /**
  * Adapter for Codex rollout JSONL. It intentionally keeps provider details in
  * this module so the monitor and graph only consume Agent and TraceEntry.
@@ -588,9 +603,15 @@ export class CodexAdapter {
       ...(model ? { model } : {}),
       ...(provider ? { provider } : {}),
       ...(effort ? { reasoningEffort: effort } : {}),
-      ...(firstString(meta, ['agent_role', 'agentRole']) ? { role: firstString(meta, ['agent_role', 'agentRole']) } : {}),
-      ...(firstString(meta, ['agent_nickname', 'agentNickname']) ? { nickname: firstString(meta, ['agent_nickname', 'agentNickname']) } : {}),
-      ...(firstString(meta, ['agent_path', 'agentPath']) ? { agentPath: firstString(meta, ['agent_path', 'agentPath']) } : {}),
+      ...(() => {
+        const agentPath = firstString(meta, ['agent_path', 'agentPath']);
+        const role = firstString(meta, ['agent_role', 'agentRole']) ?? (type === 'subagent' ? roleFromAgentPath(agentPath) : undefined);
+        return {
+          ...(role ? { role } : {}),
+          ...(firstString(meta, ['agent_nickname', 'agentNickname']) ? { nickname: firstString(meta, ['agent_nickname', 'agentNickname']) } : {}),
+          ...(agentPath ? { agentPath } : {}),
+        };
+      })(),
       ...(cwd ? { cwd } : {}),
       ...(tracePath ? { tracePath } : {}),
       ...(timestamp(meta.timestamp) !== undefined ? { createdAt: timestamp(meta.timestamp) } : {}),
@@ -650,13 +671,16 @@ export function codexTraceInfo(payload: unknown): {
 } {
   const meta = isObject(payload) ? payload : {};
   const threadSource = firstString(meta, ['thread_source', 'threadSource']);
+  const type = traceType(threadSource);
+  const agentPath = firstString(meta, ['agent_path', 'agentPath']);
+  const agentRole = firstString(meta, ['agent_role', 'agentRole']) ?? (type === 'subagent' ? roleFromAgentPath(agentPath) : undefined);
   return {
     id: firstString(meta, ['thread_id', 'threadId', 'id']),
-    type: traceType(threadSource),
+    type,
     ...(threadSource ? { threadSource } : {}),
     ...(firstString(meta, ['parent_thread_id', 'parentThreadId']) ? { parentThreadId: firstString(meta, ['parent_thread_id', 'parentThreadId']) } : {}),
-    ...(firstString(meta, ['agent_role', 'agentRole']) ? { agentRole: firstString(meta, ['agent_role', 'agentRole']) } : {}),
-    ...(firstString(meta, ['agent_path', 'agentPath']) ? { agentPath: firstString(meta, ['agent_path', 'agentPath']) } : {}),
+    ...(agentRole ? { agentRole } : {}),
+    ...(agentPath ? { agentPath } : {}),
     ...(firstString(meta, ['agent_nickname', 'agentNickname']) ? { agentNickname: firstString(meta, ['agent_nickname', 'agentNickname']) } : {}),
   };
 }
