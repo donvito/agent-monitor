@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowUpRight, Check, ChevronDown, ChevronRight, Copy, Home } from 'lucide-react';
+import { useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { ArrowUpRight, Check, ChevronDown, ChevronRight, ChevronUp, Copy, Home, Search } from 'lucide-react';
 import type { Agent, AgentHarness, TraceEntry } from '../shared/types';
 import { Dropdown } from './Dropdown';
 import { Markdown } from './Markdown';
@@ -9,10 +9,20 @@ import {
   filterConversationGroups,
   getToolInput,
   groupTraceEntries,
+  prettyTraceText,
   type ConversationGroup,
   type ConversationTool,
   type TraceEntryDetails,
 } from './traceConversation';
+import {
+  blockKey,
+  findMatches,
+  publishFindHighlights,
+  scrollRangeIntoView,
+  textRanges,
+  toolKey as toolRowKey,
+  type FindReveal,
+} from './traceFind';
 import './TraceWorkspace.css';
 
 const MAX_RECENT_ENTRIES = 200;
@@ -73,6 +83,9 @@ function saveOrder(order: TraceOrder) {
   try { localStorage.setItem(ORDER_STORAGE_KEY, order); } catch { /* Order still applies for this view. */ }
 }
 
+type FindMode = 'find' | 'filter';
+const FIND_SHORTCUT = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘F' : 'Ctrl+F';
+
 type DisclosureProps = {
   openDisclosure: Set<string>;
   onToggle: (key: string) => void;
@@ -131,26 +144,6 @@ function demoTrace(agent: Agent): TraceEntryDetails[] {
   ];
 }
 
-function isTextPart(value: unknown): value is { text: string } {
-  return typeof value === 'object' && value !== null && typeof (value as { text?: unknown }).text === 'string';
-}
-
-function prettyTraceText(text: string) {
-  const trimmed = text.trim();
-  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return text;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (parsed === null || typeof parsed !== 'object') return text;
-    // Content-part arrays ([{type:"input_text", text}]) read better as their text.
-    if (Array.isArray(parsed) && parsed.length && parsed.every(isTextPart)) {
-      return parsed.map((part) => part.text).join('\n');
-    }
-    return JSON.stringify(parsed, null, 2);
-  } catch {
-    return text;
-  }
-}
-
 function preview(text: string, length = 180) {
   const compact = text.replace(/\s+/g, ' ').trim();
   return compact.length > length ? `${compact.slice(0, length - 1)}…` : compact;
@@ -191,6 +184,19 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
   const [order, setOrder] = useState<TraceOrder>(readOrder);
   // Keys the reader toggled away from each disclosure's default state.
   const [openDisclosure, setOpenDisclosure] = useState<Set<string>>(() => new Set());
+  const [findMode, setFindMode] = useState<FindMode>('find');
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [matchIndex, setMatchIndex] = useState(0);
+  // Bumped on every next/previous so revisiting the same match scrolls to it again.
+  const [matchNavigation, setMatchNavigation] = useState(0);
+  const sectionRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // Disclosures that find toggled to reveal a match, restored when the search is cleared.
+  const revealedRef = useRef<FindReveal>({ open: [], expand: [] });
+  const revealedMatchRef = useRef<string>(undefined);
+  const scrolledMatchRef = useRef<string>(undefined);
+  const findOwner = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -198,6 +204,8 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
     setError(undefined);
     setEntries([]);
     setOpenDisclosure(new Set());
+    revealedRef.current = { open: [], expand: [] };
+    revealedMatchRef.current = undefined;
 
     if (demo) {
       setEntries(demoTrace(agent));
@@ -241,12 +249,113 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
 
   const recentEntries = entries.length > MAX_RECENT_ENTRIES ? entries.slice(-MAX_RECENT_ENTRIES) : entries;
   const groups = useMemo(() => groupTraceEntries(recentEntries), [recentEntries]);
+  const query = useDeferredValue(search);
   const filteredGroups = useMemo(() => {
-    const matches = filterConversationGroups(groups, search, kind);
-    return order === 'newest' ? matches.reverse() : matches;
-  }, [groups, kind, order, search]);
+    const byKind = filterConversationGroups(groups, '', kind);
+    const visible = findMode === 'filter' && query.trim()
+      ? byKind.filter((group) => findMatches([group], query, { caseSensitive }).length > 0)
+      : byKind;
+    return order === 'newest' ? visible.reverse() : visible;
+  }, [caseSensitive, findMode, groups, kind, order, query]);
+  const matches = useMemo(() => findMatches(filteredGroups, query, { caseSensitive }), [caseSensitive, filteredGroups, query]);
+  const currentIndex = Math.min(matchIndex, Math.max(0, matches.length - 1));
+  const currentMatch = matches[currentIndex];
+  const currentMatchKey = currentMatch ? `${query}|${currentMatch.region}|${currentMatch.occurrence}` : undefined;
   const isBounded = entries.length >= MAX_RECENT_ENTRIES;
-  const hasFilter = Boolean(search.trim() || kind !== 'all');
+  const hasFilter = Boolean((findMode === 'filter' && search.trim()) || kind !== 'all');
+
+  // Reset on what the reader typed, not on the deferred query: the deferred value can
+  // settle after an Enter and would otherwise jump back to the first match.
+  useEffect(() => setMatchIndex(0), [caseSensitive, findMode, search]);
+
+  // Open the disclosures that hide the current match, once per match.
+  useEffect(() => {
+    if (!currentMatch || revealedMatchRef.current === currentMatchKey) return;
+    revealedMatchRef.current = currentMatchKey;
+    const open = currentMatch.reveal.open.filter((key) => !openDisclosure.has(key));
+    const expand = currentMatch.reveal.expand.filter((key) => openDisclosure.has(key));
+    if (!open.length && !expand.length) return;
+    revealedRef.current = {
+      open: [...revealedRef.current.open, ...open],
+      expand: [...revealedRef.current.expand, ...expand],
+    };
+    const next = new Set(openDisclosure);
+    open.forEach((key) => next.add(key));
+    expand.forEach((key) => next.delete(key));
+    setOpenDisclosure(next);
+  }, [currentMatch, currentMatchKey, openDisclosure]);
+
+  // Clearing the search folds back what find opened.
+  useEffect(() => {
+    if (query.trim()) return;
+    revealedMatchRef.current = undefined;
+    scrolledMatchRef.current = undefined;
+    const { open, expand } = revealedRef.current;
+    if (!open.length && !expand.length) return;
+    revealedRef.current = { open: [], expand: [] };
+    setOpenDisclosure((previous) => {
+      const next = new Set(previous);
+      open.forEach((key) => next.delete(key));
+      expand.forEach((key) => next.add(key));
+      return next;
+    });
+  }, [query]);
+
+  // Highlight every rendered match and bring the current one into view.
+  useLayoutEffect(() => {
+    const root = sectionRef.current;
+    if (!root || !query.trim() || !matches.length) {
+      publishFindHighlights(findOwner);
+      return;
+    }
+    const all: Range[] = [];
+    const current: Range[] = [];
+    root.querySelectorAll<HTMLElement>('[data-find-region]').forEach((element) => {
+      const ranges = textRanges(element, query, caseSensitive);
+      all.push(...ranges);
+      if (currentMatch && element.dataset.findRegion === currentMatch.region) {
+        const range = ranges[currentMatch.occurrence] ?? ranges[0];
+        if (range) current.push(range);
+      }
+    });
+    publishFindHighlights(findOwner, { all, current });
+    const scrollKey = `${currentMatchKey}|${matchNavigation}`;
+    if (current[0] && contentRef.current && scrolledMatchRef.current !== scrollKey) {
+      scrolledMatchRef.current = scrollKey;
+      scrollRangeIntoView(current[0], contentRef.current);
+    }
+  });
+  useEffect(() => () => publishFindHighlights(findOwner), [findOwner]);
+
+  // Cmd/Ctrl+F focuses find in the visible trace tab.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'f' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (!sectionRef.current?.getClientRects().length) return;
+      event.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  function moveMatch(step: number) {
+    if (!matches.length) return;
+    setMatchIndex((currentIndex + step + matches.length) % matches.length);
+    setMatchNavigation((value) => value + 1);
+  }
+
+  function onSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      moveMatch(event.shiftKey ? -1 : 1);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      if (search) setSearch('');
+      else event.currentTarget.blur();
+    }
+  }
   const subagents = agents.filter((candidate) => candidate.parentId === agent.id);
   const parent = agent.parentId ? agents.find((candidate) => candidate.id === agent.parentId) : undefined;
 
@@ -265,8 +374,8 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
   }
 
   return (
-    <section className="trace-workspace" aria-labelledby={`${searchId}-title`}>
-      <div className="trace-workspace__content">
+    <section ref={sectionRef} className="trace-workspace" aria-labelledby={`${searchId}-title`}>
+      <div ref={contentRef} className="trace-workspace__content">
         <div className="trace-workspace__list">
           <TraceHeader
             agent={agent}
@@ -281,16 +390,29 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
           />
 
           <div className="trace-workspace__toolbar">
-            <div className="trace-workspace__search">
+            <div className="trace-workspace__search trace-find">
+              <Search size={14} aria-hidden="true" className="trace-find__icon" />
               <input
+                ref={searchRef}
                 id={searchId}
                 type="search"
-                aria-label="Search trace"
+                aria-label="Find in trace"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search conversation, tool, or result"
+                onKeyDown={onSearchKeyDown}
+                placeholder="Find in conversation, tools, and results"
                 autoComplete="off"
               />
+              {search.trim()
+                ? <span className="trace-find__count" aria-live="polite">{matches.length ? `${currentIndex + 1} / ${matches.length}` : 'No matches'}</span>
+                : <kbd className="trace-find__hint">{FIND_SHORTCUT}</kbd>}
+              <button type="button" className="trace-find__button" onClick={() => moveMatch(-1)} disabled={!matches.length} aria-label="Previous match" title="Previous match (Shift+Enter)"><ChevronUp size={14} /></button>
+              <button type="button" className="trace-find__button" onClick={() => moveMatch(1)} disabled={!matches.length} aria-label="Next match" title="Next match (Enter)"><ChevronDown size={14} /></button>
+              <button type="button" className="trace-find__button trace-find__case" onClick={() => setCaseSensitive((value) => !value)} aria-pressed={caseSensitive} aria-label="Match case" title="Match case">Aa</button>
+            </div>
+            <div className="trace-find__mode" role="group" aria-label="Search mode">
+              <button type="button" aria-pressed={findMode === 'find'} onClick={() => setFindMode('find')} title="Highlight matches and keep every card">Find</button>
+              <button type="button" aria-pressed={findMode === 'filter'} onClick={() => setFindMode('filter')} title="Show only cards with matches">Filter</button>
             </div>
             <Dropdown label="Kind" value={kind} options={kindOptions} onChange={setKind} />
             <Dropdown
@@ -464,7 +586,7 @@ function ConversationCard({ group, openDisclosure, onToggle }: { group: Conversa
       </header>
       <div className="trace-card__body">
         {group.blocks.map((block, index) => {
-          const key = `${group.id}:${block.type}:${index}`;
+          const key = blockKey(group.id, block.type, index);
           if (block.type === 'tools') {
             return <ToolGroup key={key} groupKey={key} tools={block.tools} openDisclosure={openDisclosure} onToggle={onToggle} />;
           }
@@ -479,7 +601,7 @@ function ConversationCard({ group, openDisclosure, onToggle }: { group: Conversa
                 openDisclosure={openDisclosure}
                 onToggle={onToggle}
               >
-                <Markdown className="trace-thinking__body" text={block.entry.text} />
+                <div data-find-region={key} className="trace-find__region"><Markdown className="trace-thinking__body" text={block.entry.text} /></div>
               </Disclosure>
             );
           }
@@ -495,16 +617,16 @@ function ConversationCard({ group, openDisclosure, onToggle }: { group: Conversa
                 openDisclosure={openDisclosure}
                 onToggle={onToggle}
               >
-                <CodeBlock label={failed ? 'Error' : 'Result'} text={prettyTraceText(block.entry.text)} />
+                <CodeBlock label={failed ? 'Error' : 'Result'} text={prettyTraceText(block.entry.text)} region={key} />
               </Disclosure>
             );
           }
           // Usage is summarized in the card header unless the card is only usage.
           if (block.type === 'usage' && group.kind !== 'usage') return null;
           if (block.type === 'text' && (block.entry.kind === 'assistant' || block.entry.kind === 'user')) {
-            return <Markdown key={key} className="trace-card__text" text={block.entry.text} />;
+            return <div key={key} data-find-region={key} className="trace-find__region"><Markdown className="trace-card__text" text={block.entry.text} /></div>;
           }
-          return <p key={key} className={`trace-card__note trace-card__note--${block.type}`}>{block.entry.text}</p>;
+          return <p key={key} data-find-region={key} className={`trace-card__note trace-card__note--${block.type}`}>{block.entry.text}</p>;
         })}
       </div>
     </article>
@@ -549,7 +671,7 @@ function ToolGroup({ groupKey, tools, openDisclosure, onToggle }: {
       {open && (
         <ul className="trace-tools__tree">
           {tools.map((tool, index) => (
-            <ToolRow key={`${groupKey}:${tool.call.id}:${index}`} tool={tool} toolKey={`${groupKey}:tool:${index}`} openDisclosure={openDisclosure} onToggle={onToggle} />
+            <ToolRow key={`${groupKey}:${tool.call.id}:${index}`} tool={tool} toolKey={toolRowKey(groupKey, index)} openDisclosure={openDisclosure} onToggle={onToggle} />
           ))}
         </ul>
       )}
@@ -581,15 +703,15 @@ function ToolRow({ tool, toolKey, openDisclosure, onToggle }: {
       </div>
       {open && (
         <div className="trace-tool__details">
-          <CodeBlock label="Input" text={input || '—'} />
-          {tool.result && <CodeBlock label={tool.result.kind === 'error' ? 'Error' : 'Result'} text={resultText} tone={status.tone} />}
+          <CodeBlock label="Input" text={input || '—'} region={`${toolKey}:input`} />
+          {tool.result && <CodeBlock label={tool.result.kind === 'error' ? 'Error' : 'Result'} text={resultText} tone={status.tone} region={`${toolKey}:result`} />}
         </div>
       )}
     </li>
   );
 }
 
-function CodeBlock({ label, text, tone }: { label: string; text: string; tone?: string }) {
+function CodeBlock({ label, text, tone, region }: { label: string; text: string; tone?: string; region?: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -607,7 +729,7 @@ function CodeBlock({ label, text, tone }: { label: string; text: string; tone?: 
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </button>
       </div>
-      <pre>{text}</pre>
+      <pre data-find-region={region}>{text}</pre>
     </div>
   );
 }

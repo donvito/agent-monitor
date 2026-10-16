@@ -103,6 +103,27 @@ function toolInput(entry: TraceEntryDetails) {
   return text.replace(knownPrefix, '');
 }
 
+function isTextPart(value: unknown): value is { text: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { text?: unknown }).text === 'string';
+}
+
+/** Tool payload as displayed: JSON pretty-printed, content-part arrays as their text. */
+export function prettyTraceText(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return text;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (parsed === null || typeof parsed !== 'object') return text;
+    // Content-part arrays ([{type:"input_text", text}]) read better as their text.
+    if (Array.isArray(parsed) && parsed.length && parsed.every(isTextPart)) {
+      return parsed.map((part) => part.text).join('\n');
+    }
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return text;
+  }
+}
+
 /** Returns the displayable tool input while keeping the normalized entry intact. */
 export function getToolInput(entry: TraceEntryDetails) {
   return toolInput(entry);

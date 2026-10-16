@@ -250,10 +250,16 @@
 /* Toolbar */
 
 .trace-workspace__toolbar {
+  position: sticky;
+  /* Stick to the scrollport edge, above the content's top padding. */
+  top: -20px;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 14px 0 18px;
+  margin: 4px 0 8px;
+  padding: 10px 0;
+  background: var(--bg);
 }
 
 .trace-workspace__search {
@@ -281,6 +287,126 @@
 .trace-workspace__search input:focus {
   border-color: var(--focus);
   box-shadow: 0 0 0 2px var(--accent-wash);
+}
+
+/* Find */
+
+.trace-find {
+  align-items: center;
+  gap: 2px;
+  padding: 0 5px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.trace-find:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px var(--accent-wash);
+}
+
+.trace-workspace__search.trace-find input,
+.trace-workspace__search.trace-find input:focus {
+  min-width: 0;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.trace-find__icon {
+  flex: none;
+  color: var(--dim);
+}
+
+.trace-find__count,
+.trace-find__hint {
+  flex: none;
+  padding: 0 4px;
+  color: var(--dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.trace-find__hint {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+.trace-find__button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.trace-find__button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--soft-bg);
+}
+
+.trace-find__button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.trace-find__case[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.trace-find__mode {
+  display: flex;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.trace-find__mode button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.trace-find__mode button + button {
+  border-left: 1px solid var(--border);
+}
+
+.trace-find__mode button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--accent-wash);
+}
+
+.trace-find__region {
+  display: contents;
+}
+
+::highlight(trace-find) {
+  background-color: color-mix(in srgb, var(--warning, #e0b341) 38%, transparent);
+  color: inherit;
+}
+
+::highlight(trace-find-current) {
+  background-color: var(--accent);
+  color: var(--bg);
 }
 
 .trace-workspace__toolbar .dropdown {
