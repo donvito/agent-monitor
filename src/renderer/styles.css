@@ -288,6 +288,13 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--focus); ou
 .sidebar__section-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 9px; color: var(--dim); font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
 .sidebar__section-count { color: var(--section-count); font-size: 12px; }
 .run-list { display: grid; gap: 5px; }
+.run-search { display: flex; align-items: center; gap: 6px; margin: 0 8px 9px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--dim); background: var(--surface); }
+.run-search:focus-within { border-color: var(--focus); box-shadow: 0 0 0 2px var(--accent-wash); }
+.run-search input { flex: 1; min-width: 0; height: 30px; border: 0; outline: none; color: var(--text); background: transparent; font-size: 12px; }
+.run-search input::placeholder { color: var(--dim); }
+.run-item__match { display: block; overflow: hidden; color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.run-item mark { border-radius: 2px; color: inherit; background: color-mix(in srgb, var(--warning, #e0b341) 40%, transparent); }
+.sidebar__clear { padding: 0; border: 0; color: var(--accent); background: none; font: inherit; cursor: pointer; }
 .run-item { position: relative; display: flex; align-items: flex-start; width: 100%; min-height: 69px; padding: 10px 19px 10px 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; transition: background 150ms ease, border-color 150ms ease; }
 .run-item:hover { border-color: var(--border); background: var(--soft-bg); }
 .run-item--selected { border-color: var(--accent-border); background: var(--active-gradient); }

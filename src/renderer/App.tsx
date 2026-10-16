@@ -61,6 +61,7 @@ import { Dropdown } from './Dropdown';
 import { TraceWorkspace } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
+import { filterRuns, highlightParts, runMatch, runName } from './runSearch';
 import './TraceTabs.css';
 
 type SourceMode = 'loading' | 'live' | 'offline' | 'demo';
@@ -878,7 +879,14 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
   );
 }
 
+function Highlighted({ text, query }: { text: string; query: string }) {
+  return <>{highlightParts(text, query).map((part, index) => part.match ? <mark key={index}>{part.text}</mark> : part.text)}</>;
+}
+
 function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, onDemo, usingDemo, watching, errors, loadingRunId }: { runs: AgentRun[]; agents: Agent[]; selectedRunId?: string; loadedRunId?: string; runTokenSummaries: Record<string, RunTokenSummary>; onSelectRun: (id: string) => void; onDemo: () => void; usingDemo: boolean; watching: boolean; errors: string[]; loadingRunId?: string }) {
+  const [query, setQuery] = useState('');
+  const visibleRuns = useMemo(() => filterRuns(runs, query), [runs, query]);
+  const searching = Boolean(query.trim());
   const watcherTitle = usingDemo ? 'Demo stream' : watching ? 'Trace watcher' : 'Watcher paused';
   const watcherSubtitle = usingDemo ? 'sample data loaded' : errors.length ? `${errors.length} monitor issue${errors.length === 1 ? '' : 's'}` : watching ? 'listening locally' : 'monitor connected';
   return (
@@ -886,9 +894,21 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
       <div className="brand"><div className="brand__name">Agent Monitor</div></div>
       <div className="sidebar__nav"><button type="button" className="sidebar-link sidebar-link--active">Overview<span className="sidebar-link__shortcut">⌘ 1</span></button><button type="button" className="sidebar-link">Agent topology<span className="sidebar-link__count">{agents.length}</span></button></div>
       <div className="sidebar__section">
-        <div className="sidebar__section-head"><span>Recent runs</span><span className="sidebar__section-count">{runs.length}</span></div>
+        <div className="sidebar__section-head"><span>Recent runs</span><span className="sidebar__section-count">{searching ? `${visibleRuns.length} / ${runs.length}` : runs.length}</span></div>
+        <div className="run-search">
+          <Search size={13} aria-hidden="true" />
+          <input type="search" aria-label="Search runs" placeholder="Search by session ID or folder" value={query} autoComplete="off" spellCheck={false}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.preventDefault();
+              if (query) setQuery('');
+              else event.currentTarget.blur();
+            }} />
+        </div>
         <div className="run-list">
-          {runs.map((run) => {
+          {visibleRuns.map((run) => {
+            const match = runMatch(run, query);
             const selected = run.id === selectedRunId;
             const loading = run.id === loadingRunId;
             const summary = runTokenSummaries[run.id];
@@ -905,7 +925,8 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
             return <button key={run.id} type="button" className={`run-item ${selected ? 'run-item--selected' : ''} ${loading ? 'run-item--loading' : ''}`} onClick={() => onSelectRun(run.id)} aria-busy={loading}>
               <span className="run-item__body">
                 <span className="run-item__title"><strong>{providerLabel(run.harness)}</strong><span>{runAgentCount(run, agents)} agents</span></span>
-                <span className="run-item__path" title={run.cwd || run.title || 'Current workspace'}>{run.title || run.cwd?.split('/').filter(Boolean).pop() || 'Current workspace'}</span>
+                <span className="run-item__path" title={run.cwd || run.title || 'Current workspace'}>{match?.field === 'name' ? <Highlighted text={match.text} query={query} /> : runName(run)}</span>
+                {(match?.field === 'id' || match?.field === 'path') && <span className="run-item__match" title={match.text}><Highlighted text={match.text} query={query} /></span>}
                 <span className="run-item__meta">
                   <span className="run-item__time">{loading ? 'loading agents…' : formatRelative(run.lastActivityAt ?? run.startedAt)}</span>
                   <span className={`run-item__tokens ${!summary && !loaded ? 'run-item__tokens--unknown' : ''} ${stale ? 'run-item__tokens--stale' : ''}`} title={tokenTitle}>
@@ -917,6 +938,7 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
             </button>;
           })}
         </div>
+        {runs.length > 0 && !visibleRuns.length && <div className="sidebar__empty">No runs match “{query.trim()}”. <button type="button" className="sidebar__clear" onClick={() => setQuery('')}>Clear</button></div>}
         {!runs.length && <div className="sidebar__empty">No runs discovered yet.</div>}
       </div>
       <div className="sidebar__bottom"><div className="sidebar__watching"><span className={`watching-dot ${usingDemo ? 'watching-dot--demo' : ''} ${!usingDemo && errors.length ? 'watching-dot--warning' : ''}`} /><div><strong>{watcherTitle}</strong><span>{watcherSubtitle}</span></div><button type="button" title="Load demo stream" onClick={onDemo}>Demo</button></div><div className="sidebar__tip"><span>Click an agent to inspect its normalized trace.</span></div></div>
