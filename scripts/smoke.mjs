@@ -154,7 +154,9 @@ async function agentLocator(page, id, labels) {
   if (await visible(byId)) return byId;
 
   for (const label of labels) {
-    const text = textLocator(page, label, { exact: true }).first();
+    // Hidden copies of a label (e.g. a previous graph still in the DOM) must
+    // not win over the visible node.
+    const text = textLocator(page, label, { exact: true }).filter({ visible: true }).first();
     if (!await text.count()) continue;
     const ancestors = [
       text.locator('xpath=ancestor::*[@data-agent-id][1]'),
@@ -177,7 +179,12 @@ async function flowNodeLocator(page, id, labels) {
 }
 
 async function clickAgent(page, id, labels) {
-  const locator = await flowNodeLocator(page, id, labels);
+  // The graph can still be laying out right after a run switch. Resolve the
+  // node again until it is visible instead of settling on the first lookup.
+  const locator = await waitFor(`agent ${id} to be visible`, async () => {
+    const candidate = await flowNodeLocator(page, id, labels).catch(() => null);
+    return candidate && await candidate.isVisible().catch(() => false) ? candidate : null;
+  });
   await locator.click({ timeout: timeoutMs });
   return locator;
 }
