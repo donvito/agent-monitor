@@ -61,6 +61,7 @@ import { Dropdown } from './Dropdown';
 import { TraceWorkspace } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
+import { applyRunFilters, DEFAULT_RUN_FILTERS, projectOptions, RUN_PERIODS, withinPeriod, type RunFilters, type RunPeriod } from './runFilters';
 import './TraceTabs.css';
 
 type SourceMode = 'loading' | 'live' | 'offline' | 'demo';
@@ -878,15 +879,84 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
   );
 }
 
-function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, onDemo, usingDemo, watching, errors, loadingRunId }: { runs: AgentRun[]; agents: Agent[]; selectedRunId?: string; loadedRunId?: string; runTokenSummaries: Record<string, RunTokenSummary>; onSelectRun: (id: string) => void; onDemo: () => void; usingDemo: boolean; watching: boolean; errors: string[]; loadingRunId?: string }) {
+const RUN_FILTERS_STORAGE_KEY = 'agent-monitor.run-filters';
+
+function readRunFilters(): RunFilters {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RUN_FILTERS_STORAGE_KEY) ?? '{}') as Partial<RunFilters>;
+    return {
+      period: RUN_PERIODS.some((item) => item.value === saved.period) ? saved.period as RunPeriod : DEFAULT_RUN_FILTERS.period,
+      project: typeof saved.project === 'string' && saved.project ? saved.project : DEFAULT_RUN_FILTERS.project,
+    };
+  } catch {
+    return DEFAULT_RUN_FILTERS;
+  }
+}
+
+function saveRunFilters(filters: RunFilters) {
+  try { localStorage.setItem(RUN_FILTERS_STORAGE_KEY, JSON.stringify(filters)); } catch { /* Filters still apply for this session. */ }
+}
+
+function RunFilterFields({ runs, filters, onChange }: { runs: AgentRun[]; filters: RunFilters; onChange: (filters: RunFilters) => void }) {
+  // Offer the projects active in the chosen period, plus the chosen one so its name stays visible.
+  const projects = projectOptions(runs.filter((run) => withinPeriod(run, filters.period, now())));
+  if (filters.project !== 'all' && !projects.some((project) => project.name === filters.project)) projects.push({ name: filters.project, count: 0, paths: [] });
+  return (
+    <>
+      <Dropdown label="Period" value={filters.period} options={RUN_PERIODS.map((period) => ({ value: period.value, label: period.label }))}
+        onChange={(value) => onChange({ ...filters, period: value as RunPeriod })} />
+      <Dropdown label="Project" value={filters.project}
+        options={[{ value: 'all', label: 'All' }, ...projects.map((project) => ({
+          value: project.name,
+          label: project.name,
+          description: `${project.count} run${project.count === 1 ? '' : 's'}${project.paths.length > 1 ? ` · ${project.paths.length} folders` : ''}`,
+        }))]}
+        onChange={(value) => onChange({ ...filters, project: value })} />
+    </>
+  );
+}
+
+/** Run filters in the top bar; a narrow workspace shows them behind a Filters button instead. */
+function RunFiltersControls(props: { runs: AgentRun[]; filters: RunFilters; onChange: (filters: RunFilters) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapper = useRef<HTMLDivElement>(null);
+  const changed = Number(props.filters.period !== DEFAULT_RUN_FILTERS.period) + Number(props.filters.project !== DEFAULT_RUN_FILTERS.project);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !wrapper.current?.contains(event.target as Element)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [open]);
+  return (
+    <div className="run-filters" ref={wrapper}>
+      <div className="run-filters__inline"><RunFilterFields {...props} /></div>
+      <div className="run-filters__compact">
+        <button type="button" className="run-filters__toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          <Filter size={13} aria-hidden="true" />Filters{changed ? <span className="run-filters__badge">{changed}</span> : null}
+        </button>
+        {open && <div className="run-filters__panel"><RunFilterFields {...props} /></div>}
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({ runs, allRuns, filters, onFiltersChange, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, onDemo, usingDemo, watching, errors, loadingRunId }: { runs: AgentRun[]; allRuns: AgentRun[]; filters: RunFilters; onFiltersChange: (filters: RunFilters) => void; agents: Agent[]; selectedRunId?: string; loadedRunId?: string; runTokenSummaries: Record<string, RunTokenSummary>; onSelectRun: (id: string) => void; onDemo: () => void; usingDemo: boolean; watching: boolean; errors: string[]; loadingRunId?: string }) {
   const watcherTitle = usingDemo ? 'Demo stream' : watching ? 'Trace watcher' : 'Watcher paused';
   const watcherSubtitle = usingDemo ? 'sample data loaded' : errors.length ? `${errors.length} monitor issue${errors.length === 1 ? '' : 's'}` : watching ? 'listening locally' : 'monitor connected';
   return (
     <aside className="sidebar">
       <div className="brand"><div className="brand__name">Agent Monitor</div></div>
       <div className="sidebar__nav"><button type="button" className="sidebar-link sidebar-link--active">Overview<span className="sidebar-link__shortcut">⌘ 1</span></button><button type="button" className="sidebar-link">Agent topology<span className="sidebar-link__count">{agents.length}</span></button></div>
+      <div className="sidebar__runs-head">
+        <div className="sidebar__section-head"><span>Recent runs</span><span className="sidebar__section-count">{runs.length === allRuns.length ? allRuns.length : `${runs.length} / ${allRuns.length}`}</span></div>
+      </div>
       <div className="sidebar__section">
-        <div className="sidebar__section-head"><span>Recent runs</span><span className="sidebar__section-count">{runs.length}</span></div>
         <div className="run-list">
           {runs.map((run) => {
             const selected = run.id === selectedRunId;
@@ -917,7 +987,8 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
             </button>;
           })}
         </div>
-        {!runs.length && <div className="sidebar__empty">No runs discovered yet.</div>}
+        {!allRuns.length && <div className="sidebar__empty">No runs discovered yet.</div>}
+        {allRuns.length > 0 && !runs.length && <div className="sidebar__empty">No runs match the filters. <button type="button" className="sidebar__clear" onClick={() => onFiltersChange({ period: 'all', project: 'all' })}>Show all</button></div>}
       </div>
       <div className="sidebar__bottom"><div className="sidebar__watching"><span className={`watching-dot ${usingDemo ? 'watching-dot--demo' : ''} ${!usingDemo && errors.length ? 'watching-dot--warning' : ''}`} /><div><strong>{watcherTitle}</strong><span>{watcherSubtitle}</span></div><button type="button" title="Load demo stream" onClick={onDemo}>Demo</button></div><div className="sidebar__tip"><span>Click an agent to inspect its normalized trace.</span></div></div>
     </aside>
@@ -942,8 +1013,12 @@ function App() {
   const { snapshot: sourceSnapshot, mode, setDemo, setLive, usingDemo, loadedRunId, loadingRunId, runLoadError, loadRun } = useMonitorSnapshot();
   const { providerFilter, selectedRunId, selectedAgentId, setProviderFilter, selectRun, selectAgent } = useDashboardStore();
 
-  const runs = useMemo(() => [...sourceSnapshot.runs].filter((run) => providerFilter === 'all' || run.harness === providerFilter).sort(runSort), [providerFilter, sourceSnapshot.runs]);
-  const selectedRun = runs.find((run) => run.id === selectedRunId);
+  const [runFilters, setRunFilters] = useState<RunFilters>(readRunFilters);
+  const allRuns = useMemo(() => [...sourceSnapshot.runs].filter((run) => providerFilter === 'all' || run.harness === providerFilter).sort(runSort), [providerFilter, sourceSnapshot.runs]);
+  // The selected run stays listed even when it no longer matches the filters.
+  const runs = useMemo(() => applyRunFilters(allRuns, runFilters, now(), selectedRunId), [allRuns, runFilters, selectedRunId]);
+  useEffect(() => saveRunFilters(runFilters), [runFilters]);
+  const selectedRun = allRuns.find((run) => run.id === selectedRunId);
   const agents = useMemo(() => sourceSnapshot.agents.filter((agent) => providerFilter === 'all' || agent.harness === providerFilter), [providerFilter, sourceSnapshot.agents]);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
   const expandedAgent = activeTraceId ? agents.find(agent => agent.id === activeTraceId) ?? traceTabs.find(agent => agent.id === activeTraceId) : undefined;
@@ -983,11 +1058,11 @@ function App() {
   }, [loadedRunAgents, loadedRunId, loadedRunMetadata, loadingRunId]);
 
   useEffect(() => {
-    if (selectedRunId && !runs.some((run) => run.id === selectedRunId)) {
+    if (selectedRunId && !allRuns.some((run) => run.id === selectedRunId)) {
       selectRun(undefined);
       selectAgent(null);
     }
-  }, [runs, selectedRunId, selectAgent, selectRun]);
+  }, [allRuns, selectedRunId, selectAgent, selectRun]);
 
   useEffect(() => {
     if (selectedAgentId && agents.some((agent) => agent.id === selectedAgentId)) return;
@@ -1038,9 +1113,9 @@ function App() {
 
   return (
     <div className="app-shell">
-      {!expandedAgent && <Sidebar runs={runs} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} onDemo={handleDemo} usingDemo={usingDemo} watching={sourceSnapshot.watching} errors={sourceSnapshot.errors} loadingRunId={loadingRunId} />}
+      {!expandedAgent && <Sidebar runs={runs} allRuns={allRuns} filters={runFilters} onFiltersChange={setRunFilters} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} onDemo={handleDemo} usingDemo={usingDemo} watching={sourceSnapshot.watching} errors={sourceSnapshot.errors} loadingRunId={loadingRunId} />}
       <main className="workspace">
-        <header className="topbar"><div className="topbar__context"><span className="topbar__section-label">Workspace</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || 'Agent activity'}</span></div><div className="topbar__controls"><ThemeSelector /><Dropdown label="Provider" value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.label }))} onChange={value => setProviderFilter(value as ProviderFilter)} /><Dropdown label="Run" value={selectedRun?.id ?? ''} placeholder="Select a run" wide options={runs.map(run => ({ value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || 'workspace', description: `${providerLabel(run.harness)} · ${runAgentCount(run, agents)} agents · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }))} onChange={handleRunSelect} /><span className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</span>{usingDemo && <button type="button" className="button button--tiny" onClick={handleReturnLive} disabled={!window.agentMonitor}>Return to live</button>}</div></header>
+        <header className="topbar"><div className="topbar__context"><span className="topbar__section-label">Workspace</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || 'Agent activity'}</span></div><div className="topbar__controls"><ThemeSelector /><Dropdown label="Provider" value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.label }))} onChange={value => setProviderFilter(value as ProviderFilter)} /><RunFiltersControls runs={allRuns} filters={runFilters} onChange={setRunFilters} /><Dropdown label="Run" value={selectedRun?.id ?? ''} placeholder="Select a run" wide options={runs.map(run => ({ value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || 'workspace', description: `${providerLabel(run.harness)} · ${runAgentCount(run, agents)} agents · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }))} onChange={handleRunSelect} /><span className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</span>{usingDemo && <button type="button" className="button button--tiny" onClick={handleReturnLive} disabled={!window.agentMonitor}>Return to live</button>}</div></header>
         {traceTabs.length > 0 && <div className="workspace-tabs" role="tablist" aria-label="Workspace views" onKeyDown={event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
           const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
