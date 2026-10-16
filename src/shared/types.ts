@@ -29,6 +29,10 @@ export interface AgentEdge { id: string; source: string; target: string; type: '
 export interface MonitorSnapshot { agents: Agent[]; runs: AgentRun[]; edges: AgentEdge[]; watching: boolean; errors: string[]; selectedRunId?: string }
 /** `usage` holds the token counts of the single request a usage entry reports. */
 export interface TraceEntry { usage?: { input: number; output: number }; callId?: string; toolName?: string; model?: string; reasoningEffort?: string; turnId?: string; id: string; timestamp?: number; kind: 'user' | 'assistant' | 'thinking' | 'tool-call' | 'tool-result' | 'usage' | 'error' | 'event'; text: string }
+/** A range of a trace by absolute entry index: from `start`, up to `end`, or the latest entries when neither is set. */
+export interface TraceRangeRequest { start?: number; end?: number; limit: number }
+/** Entries of a trace range, the absolute index of the first one, and the trace's total entry count. */
+export interface TracePage { entries: TraceEntry[]; start: number; total: number }
 export type AgentEvent = { type: 'agent.discovered'; agent: Agent } | { type: 'agent.spawned'; agent: Agent } | {type:'agent.updated';agentId:string;changes:Partial<Agent>} | {type:'agent.finished';agentId:string} | {type:'agent.error';agentId:string;error?:string} | {type:'agent.activity';agentId:string;timestamp:number} | {type:'run.discovered';run:AgentRun};
-export interface MonitorBridge { platform?: string; getSnapshot(): Promise<MonitorSnapshot>; onSnapshot(callback: (snapshot: MonitorSnapshot) => void): () => void; getTrace(agentId: string): Promise<TraceEntry[]>; loadRun(runId: string): Promise<void> }
+export interface MonitorBridge { platform?: string; getSnapshot(): Promise<MonitorSnapshot>; onSnapshot(callback: (snapshot: MonitorSnapshot) => void): () => void; getTrace(agentId: string): Promise<TraceEntry[]>; getTraceRange(agentId: string, request: TraceRangeRequest): Promise<TracePage>; loadRun(runId: string): Promise<void> }
 declare global { interface Window { agentMonitor?: MonitorBridge } }

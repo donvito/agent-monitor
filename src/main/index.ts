@@ -3,6 +3,7 @@ import path from 'node:path';
 import { TraceMonitor } from './trace-monitor/TraceMonitor';
 import { HermesMonitor } from './trace-monitor/HermesMonitor';
 import { MultiSourceMonitor } from './trace-monitor/MultiSourceMonitor';
+import type { TraceRangeRequest } from '../shared/types';
 
 let window: BrowserWindow | null = null;
 const idle = Number(process.env.AGENT_MONITOR_IDLE_MS);
@@ -17,6 +18,19 @@ const monitor = new MultiSourceMonitor([
 const developmentUrl = process.env.VITE_DEV_SERVER_URL;
 // Packaged apps ship the icon as an extra resource; development reads it from build/ (icon.icns and icon.ico sit beside it).
 const iconPath = app.isPackaged ? path.join(process.resourcesPath, 'icon.png') : path.join(__dirname, '../build/icon.png');
+/** Accepts a trace range whose indices and limit are non-negative integers. */
+function traceRangeRequest(value: unknown): TraceRangeRequest {
+  const request = value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const index = (field: unknown) => typeof field === 'number' && Number.isSafeInteger(field) && field >= 0 ? field : undefined;
+  const limit = index(request.limit);
+  const start = index(request.start);
+  const end = index(request.end);
+  if (limit === undefined || (request.start !== undefined && start === undefined) || (request.end !== undefined && end === undefined)) {
+    throw new Error('Invalid trace range');
+  }
+  return { ...(start !== undefined ? { start } : {}), ...(end !== undefined ? { end } : {}), limit };
+}
+
 function assertSender(event: Electron.IpcMainInvokeEvent) {
   if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Untrusted IPC sender');
 }
@@ -46,6 +60,11 @@ else {
       assertSender(event);
       if (typeof agentId !== 'string' || agentId.length > 1024) throw new Error('Invalid agent identifier');
       return monitor.getTrace(agentId);
+    });
+    ipcMain.handle('monitor:trace-range', (event, agentId: unknown, request: unknown) => {
+      assertSender(event);
+      if (typeof agentId !== 'string' || agentId.length > 1024) throw new Error('Invalid agent identifier');
+      return monitor.getTraceRange(agentId, traceRangeRequest(request));
     });
     ipcMain.handle('monitor:load-run', (event, runId: unknown) => {
       assertSender(event);

@@ -294,8 +294,19 @@
   white-space: nowrap;
 }
 
-.trace-workspace__notice {
-  margin: -6px 0 16px;
+.trace-workspace__jump {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.trace-workspace__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 1px;
+  padding: 16px 0;
   color: var(--muted);
   font-size: 12px;
 }
@@ -329,6 +340,12 @@
 
 .trace-card--user { --card-accent: var(--tool-result); }
 .trace-card--tool { --card-accent: var(--warning); }
+/* Cards off screen skip layout and paint, which keeps long, fully loaded traces responsive. */
+.trace-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+
 .trace-card--event,
 .trace-card--usage { --card-accent: var(--dim); }
 .trace-card--error { --card-accent: var(--danger); }

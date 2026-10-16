@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { watch, type FSWatcher } from 'chokidar';
-import type { Agent, AgentRun, MonitorSnapshot, TraceEntry } from '../../shared/types';
+import type { Agent, AgentRun, MonitorSnapshot, TraceEntry, TracePage, TraceRangeRequest } from '../../shared/types';
+import { sliceTraceRange } from '../../shared/traceRange';
 import { replaceAgents, type AgentGraphState } from '../../graph/reducer';
 import {
   createProviderSession,
@@ -38,6 +39,8 @@ interface FileState {
   observation?: CodexObservation;
   initialized: boolean;
   mtimeMs?: number;
+  /** Keeps every record; used for full reads that serve paged trace ranges. */
+  unbounded?: boolean;
 }
 
 interface InventoryEntry {
@@ -84,6 +87,8 @@ const HEADER_READ_CHUNK_BYTES = 8 * 1024;
 const INITIAL_READ_CONCURRENCY = 8;
 const MAX_PARSED_RECORDS = 512;
 const MAX_MONITOR_TRACE_ENTRIES = 200;
+/** Full traces kept in memory for paged reading, least recently used first out. */
+const MAX_FULL_TRACES = 4;
 const MAX_PENDING_TEXT = 2 * 1024 * 1024;
 const MAX_RAW_PROBE_RECORDS = 128;
 const MAX_RAW_PROBE_BYTES = 2 * 1024 * 1024;
@@ -229,6 +234,33 @@ function usage(value: unknown): { input?: number; output?: number } {
  * Files are read by byte offset; a StringDecoder and retained line suffix
  * make writes split across UTF-8 code points or JSON lines safe.
  */
+/** A trace file read in full for paged ranges, kept with its reader state so appends parse incrementally. */
+interface FullTrace {
+  state: FileState;
+  mtimeMs: number;
+  entries: TraceEntry[];
+}
+
+function createFileState(filePath: string, identity: string | undefined, unbounded = false): FileState {
+  return {
+    path: filePath,
+    offset: 0,
+    lineIndex: 0,
+    pendingText: '',
+    discardingOversizedLine: false,
+    decoder: new StringDecoder('utf8'),
+    identity,
+    records: [],
+    aggregate: createAggregate(),
+    headerEmitted: false,
+    probe: [],
+    probeBytes: 0,
+    nextCanonicalIndex: 0,
+    initialized: false,
+    ...(unbounded ? { unbounded } : {}),
+  };
+}
+
 export class TraceMonitor extends EventEmitter {
   private readonly roots: string[];
   private readonly idleMs: number;
@@ -237,6 +269,9 @@ export class TraceMonitor extends EventEmitter {
   private readonly queues = new Map<string, Promise<void>>();
   private readonly observedSignatures = new Map<string, FileSignature>();
   private readonly traces = new Map<string, TraceEntry[]>();
+  private readonly fullTraces = new Map<string, FullTrace>();
+  // One full read per file at a time, so concurrent range requests share it.
+  private readonly fullTraceReads = new Map<string, Promise<TraceEntry[]>>();
   private readonly errors: string[] = [];
   private watcher?: FSWatcher;
   private idleTimer?: NodeJS.Timeout;
@@ -437,6 +472,48 @@ export class TraceMonitor extends EventEmitter {
       if (state.observation?.agent.id === agentId) return state.observation.entries.map((entry) => ({ ...entry }));
     }
     return [];
+  }
+
+  /** A page of an agent's whole trace, read from its file without the bounded window. */
+  async getTraceRange(agentId: string, request: TraceRangeRequest): Promise<TracePage> {
+    const tracePath = [...this.files.values()].find((state) => state.observation?.agent.id === agentId)?.path;
+    const entries = tracePath ? await this.readFullTrace(tracePath) : await this.getTrace(agentId);
+    return sliceTraceRange(entries, request);
+  }
+
+  private readFullTrace(tracePath: string): Promise<TraceEntry[]> {
+    const previous = this.fullTraceReads.get(tracePath) ?? Promise.resolve([]);
+    const read = previous.catch(() => []).then(() => this.updateFullTrace(tracePath));
+    this.fullTraceReads.set(tracePath, read);
+    void read.finally(() => {
+      if (this.fullTraceReads.get(tracePath) === read) this.fullTraceReads.delete(tracePath);
+    }).catch(() => undefined);
+    return read;
+  }
+
+  /** Brings the cached full trace up to date, parsing only bytes appended since the last read. */
+  private async updateFullTrace(tracePath: string): Promise<TraceEntry[]> {
+    const stat = await fs.stat(tracePath);
+    const identity = statIdentity(stat);
+    let cached = this.fullTraces.get(tracePath);
+    this.fullTraces.delete(tracePath);
+    const appendedOnly = cached
+      && cached.state.identity === identity
+      && (stat.size > cached.state.offset || (stat.size === cached.state.offset && stat.mtimeMs === cached.mtimeMs));
+    if (!cached || !appendedOnly) {
+      cached = { state: createFileState(tracePath, identity, true), mtimeMs: stat.mtimeMs, entries: [] };
+    }
+    if (stat.size > cached.state.offset || !cached.entries.length) {
+      await this.readDelta(cached.state, stat.size);
+      cached.entries = inspectCanonical(cached.state.records, { tracePath, maxEntries: Infinity })?.entries ?? [];
+    }
+    cached.mtimeMs = stat.mtimeMs;
+    this.fullTraces.set(tracePath, cached);
+    for (const oldest of this.fullTraces.keys()) {
+      if (this.fullTraces.size <= MAX_FULL_TRACES) break;
+      this.fullTraces.delete(oldest);
+    }
+    return cached.entries;
   }
 
   private async findTraceFiles(): Promise<string[]> {
@@ -698,22 +775,7 @@ export class TraceMonitor extends EventEmitter {
     if (!state || reset) {
       const hadObservation = !!state?.observation;
       if (state?.observation) this.removeObservation(state.observation.agent.id);
-      state = {
-        path: normalized,
-        offset: 0,
-        lineIndex: 0,
-        pendingText: '',
-        discardingOversizedLine: false,
-        decoder: new StringDecoder('utf8'),
-        identity,
-        records: [],
-        aggregate: createAggregate(),
-        headerEmitted: false,
-        probe: [],
-        probeBytes: 0,
-        nextCanonicalIndex: 0,
-        initialized: false,
-      };
+      state = createFileState(normalized, identity);
       this.files.set(normalized, state);
       if (hadObservation) {
         this.rebuildGraph();
@@ -1052,7 +1114,7 @@ export class TraceMonitor extends EventEmitter {
   }
 
   private boundRecords(state: FileState): void {
-    if (state.records.length <= MAX_PARSED_RECORDS) return;
+    if (state.unbounded || state.records.length <= MAX_PARSED_RECORDS) return;
     const header = state.records.find((record) => objectValue(record.value)?.type === 'session_meta');
     const latestTurnContext = [...state.records].reverse().find((record) => objectValue(record.value)?.type === 'turn_context');
     const preserved = [header, latestTurnContext].filter((record): record is TraceRecord => !!record);

@@ -20,6 +20,8 @@ export interface CodexAdapterOptions {
   now?: number;
   tracePath?: string;
   previous?: Agent;
+  /** Most recent entries to keep; defaults to MAX_TRACE_ENTRIES. Infinity keeps the whole trace. */
+  maxEntries?: number;
 }
 
 const TOOL_CALL_TYPES = new Set([
@@ -212,7 +214,6 @@ function normaliseRecords(records: Array<TraceRecord | unknown>): TraceRecord[] 
 function addEntry(entries: TraceEntry[], entry: TraceEntry): void {
   if (!entry.text.trim() && entry.kind !== 'tool-result' && !(entry.kind === 'error' && entry.callId)) return;
   entries.push({ ...entry, text: truncateText(entry.text) });
-  if (entries.length > MAX_TRACE_ENTRIES) entries.splice(0, entries.length - MAX_TRACE_ENTRIES);
 }
 
 function timelineEntry(
@@ -604,7 +605,15 @@ export class CodexAdapter {
       },
     };
 
-    return { agent, entries, completed, failed, lastTimestamp, completionTimestamp };
+    const maxEntries = options.maxEntries ?? MAX_TRACE_ENTRIES;
+    return {
+      agent,
+      entries: entries.length > maxEntries ? entries.slice(-maxEntries) : entries,
+      completed,
+      failed,
+      lastTimestamp,
+      completionTimestamp,
+    };
   }
 
   parse(records: Array<TraceRecord | unknown>, options: CodexAdapterOptions = {}): CodexObservation | null {

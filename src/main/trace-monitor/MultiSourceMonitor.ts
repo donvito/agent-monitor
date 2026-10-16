@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import type { MonitorSnapshot, TraceEntry } from '../../shared/types';
+import type { MonitorSnapshot, TraceEntry, TracePage, TraceRangeRequest } from '../../shared/types';
+import { sliceTraceRange } from '../../shared/traceRange';
 
 export interface MonitorSource extends EventEmitter {
   start(): Promise<void>;
@@ -8,6 +9,8 @@ export interface MonitorSource extends EventEmitter {
   loadRun(runId: string): Promise<void>;
   unloadRun(): void;
   getTrace(agentId: string): Promise<TraceEntry[]>;
+  /** Pages of the whole trace; sources without it are paged from getTrace. */
+  getTraceRange?(agentId: string, request: TraceRangeRequest): Promise<TracePage>;
 }
 
 /** Keeps selection exclusive across file and database sources. */
@@ -71,5 +74,12 @@ export class MultiSourceMonitor extends EventEmitter {
   async getTrace(agentId: string): Promise<TraceEntry[]> {
     if (!this.snapshot().agents.some(agent => agent.id === agentId)) return [];
     return this.selectedSource?.getTrace(agentId) ?? [];
+  }
+
+  async getTraceRange(agentId: string, request: TraceRangeRequest): Promise<TracePage> {
+    const source = this.selectedSource;
+    if (!source || !this.snapshot().agents.some(agent => agent.id === agentId)) return sliceTraceRange([], request);
+    if (source.getTraceRange) return source.getTraceRange(agentId, request);
+    return sliceTraceRange(await source.getTrace(agentId), request);
   }
 }
