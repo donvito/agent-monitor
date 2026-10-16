@@ -693,9 +693,8 @@
   background: var(--hover-bg);
 }
 
-.trace-code pre {
+.trace-code__body {
   max-height: 460px;
-  margin: 0;
   overflow: auto;
   padding: 14px 16px;
   border: 1px solid var(--border);
@@ -704,12 +703,101 @@
   font-family: var(--trace-mono);
   font-size: 13px;
   line-height: 1.6;
+}
+
+.trace-code__body pre {
+  margin: 0;
+  font: inherit;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.trace-code--error pre {
+.trace-code--error .trace-code__body {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+.trace-code__actions {
+  display: flex;
+  gap: 2px;
+}
+
+.trace-code__label button.trace-code__raw {
+  width: auto;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.trace-code__raw[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+/* Decorated payloads */
+
+.payload__caption {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
+.payload__path {
+  margin: 0 0 8px;
+  color: var(--accent);
+}
+
+.payload__label {
+  margin: 10px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.trace-code__body .payload__block {
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.trace-code__body .payload__block--before {
+  border-left-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+}
+
+.trace-code__body .payload__block--after {
+  border-left-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+
+.payload__fields {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.payload__command + .payload__fields,
+.payload__fields .payload__fields {
+  margin-top: 6px;
+}
+
+.payload__field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 12px;
+}
+
+.payload__field--block,
+.payload__field--fields {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.payload__field dt {
+  color: var(--muted);
+}
+
+.payload__field dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Empty states */

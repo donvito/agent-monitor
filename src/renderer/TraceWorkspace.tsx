@@ -13,6 +13,7 @@ import {
   type ConversationTool,
   type TraceEntryDetails,
 } from './traceConversation';
+import { formatPayload, payloadPreview, payloadText, type PayloadField, type PayloadView } from './formatPayload';
 import './TraceWorkspace.css';
 
 const MAX_RECENT_ENTRIES = 200;
@@ -129,26 +130,6 @@ function demoTrace(agent: Agent): TraceEntryDetails[] {
       callId: `${agent.id}-demo-call`,
     },
   ];
-}
-
-function isTextPart(value: unknown): value is { text: string } {
-  return typeof value === 'object' && value !== null && typeof (value as { text?: unknown }).text === 'string';
-}
-
-function prettyTraceText(text: string) {
-  const trimmed = text.trim();
-  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return text;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (parsed === null || typeof parsed !== 'object') return text;
-    // Content-part arrays ([{type:"input_text", text}]) read better as their text.
-    if (Array.isArray(parsed) && parsed.length && parsed.every(isTextPart)) {
-      return parsed.map((part) => part.text).join('\n');
-    }
-    return JSON.stringify(parsed, null, 2);
-  } catch {
-    return text;
-  }
 }
 
 function preview(text: string, length = 180) {
@@ -491,11 +472,11 @@ function ConversationCard({ group, openDisclosure, onToggle }: { group: Conversa
                 id={key}
                 className={`trace-orphan ${failed ? 'trace-orphan--error' : ''}`}
                 title={failed ? 'Unmatched tool error' : 'Unmatched tool result'}
-                summary={preview(prettyTraceText(block.entry.text))}
+                summary={preview(payloadPreview(formatPayload(block.entry.text)))}
                 openDisclosure={openDisclosure}
                 onToggle={onToggle}
               >
-                <CodeBlock label={failed ? 'Error' : 'Result'} text={prettyTraceText(block.entry.text)} />
+                <CodeBlock label={failed ? 'Error' : 'Result'} raw={block.entry.text} />
               </Disclosure>
             );
           }
@@ -564,7 +545,8 @@ function ToolRow({ tool, toolKey, openDisclosure, onToggle }: {
   const open = openDisclosure.has(toolKey);
   const input = getToolInput(tool.call);
   const status = toolStatus(tool);
-  const resultText = tool.result ? prettyTraceText(tool.result.text) || 'Empty result' : '';
+  const inputView = useMemo(() => formatPayload(input), [input]);
+  const resultView = useMemo(() => (tool.result ? formatPayload(tool.result.text) : undefined), [tool.result]);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <li className={`trace-tool trace-tool--${status.tone}`}>
@@ -572,43 +554,116 @@ function ToolRow({ tool, toolKey, openDisclosure, onToggle }: {
         <Chevron size={13} aria-hidden="true" />
         <ArrowUpRight size={13} aria-hidden="true" className="trace-tool__icon" />
         <strong>{tool.call.toolName || 'tool'}</strong>
-        <code>{preview(input, 120) || 'No input'}</code>
+        <code>{preview(payloadPreview(inputView), 120) || 'No input'}</code>
         <em>· {status.label}</em>
       </button>
       <div className="trace-tool__preview">
         <span aria-hidden="true" />
-        {tool.result ? preview(resultText, 240) : 'No result in the retained trace.'}
+        {resultView ? preview(payloadPreview(resultView), 240) || 'Empty result' : 'No result in the retained trace.'}
       </div>
       {open && (
         <div className="trace-tool__details">
-          <CodeBlock label="Input" text={input || '—'} />
-          {tool.result && <CodeBlock label={tool.result.kind === 'error' ? 'Error' : 'Result'} text={resultText} tone={status.tone} />}
+          <CodeBlock label="Input" raw={input || '—'} view={inputView} />
+          {tool.result && <CodeBlock label={tool.result.kind === 'error' ? 'Error' : 'Result'} raw={tool.result.text || 'Empty result'} view={resultView} tone={status.tone} />}
         </div>
       )}
     </li>
   );
 }
 
-function CodeBlock({ label, text, tone }: { label: string; text: string; tone?: string }) {
+/**
+ * A tool payload shown readable by default. Raw shows the original text, and
+ * Copy copies whichever is shown.
+ */
+function CodeBlock({ label, raw, view, tone }: { label: string; raw: string; view?: PayloadView; tone?: string }) {
   const [copied, setCopied] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+  const decorated = useMemo(() => view ?? formatPayload(raw), [raw, view]);
+  // Plain text gains nothing from a raw view.
+  const hasRaw = !(decorated.kind === 'text' && decorated.text === raw);
+  const shown = showRaw || !hasRaw ? raw : payloadText(decorated);
+  const name = label.toLowerCase();
   useEffect(() => {
     if (!copied) return;
     const timer = window.setTimeout(() => setCopied(false), 1_400);
     return () => window.clearTimeout(timer);
   }, [copied]);
   function copy() {
-    void navigator.clipboard?.writeText(text).then(() => setCopied(true), () => undefined);
+    void navigator.clipboard?.writeText(shown).then(() => setCopied(true), () => undefined);
   }
   return (
     <div className={`trace-code ${tone ? `trace-code--${tone}` : ''}`}>
       <div className="trace-code__label">
         <span>{label}</span>
-        <button type="button" onClick={copy} aria-label={`Copy ${label.toLowerCase()}`} title={copied ? 'Copied' : 'Copy'}>
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-        </button>
+        <span className="trace-code__actions">
+          {hasRaw && (
+            <button type="button" className="trace-code__raw" onClick={() => setShowRaw((value) => !value)} aria-pressed={showRaw}
+              aria-label={showRaw ? `Show formatted ${name}` : `Show raw ${name}`} title={showRaw ? 'Show formatted' : 'Show raw'}>
+              Raw
+            </button>
+          )}
+          <button type="button" onClick={copy} aria-label={`Copy ${name}`} title={copied ? 'Copied' : 'Copy'}>
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+        </span>
       </div>
-      <pre>{text}</pre>
+      <div className="trace-code__body">
+        {showRaw || !hasRaw ? <pre>{raw}</pre> : <PayloadBody view={decorated} />}
+      </div>
     </div>
+  );
+}
+
+function PayloadBody({ view }: { view: PayloadView }) {
+  if (view.kind === 'text') return <pre>{view.text}</pre>;
+  if (view.kind === 'command') {
+    return (
+      <>
+        {view.description && <p className="payload__caption">{view.description}</p>}
+        <pre className="payload__command">{view.command}</pre>
+        <PayloadFields fields={view.fields} />
+      </>
+    );
+  }
+  if (view.kind === 'edit') {
+    return (
+      <>
+        <p className="payload__path">{view.path}</p>
+        <div className="payload__label">Before</div>
+        <pre className="payload__block payload__block--before">{view.before}</pre>
+        <div className="payload__label">After</div>
+        <pre className="payload__block payload__block--after">{view.after}</pre>
+        <PayloadFields fields={view.fields} />
+      </>
+    );
+  }
+  if (view.kind === 'file') {
+    return (
+      <>
+        <p className="payload__path">{view.path}</p>
+        <pre className="payload__block">{view.content}</pre>
+        <PayloadFields fields={view.fields} />
+      </>
+    );
+  }
+  return <PayloadFields fields={view.fields} />;
+}
+
+function PayloadFields({ fields }: { fields: PayloadField[] }) {
+  if (!fields.length) return null;
+  return (
+    <dl className="payload__fields">
+      {fields.map(({ key, value }) => (
+        <div key={key} className={`payload__field payload__field--${value.kind}`}>
+          <dt>{key}</dt>
+          <dd>
+            {value.kind === 'scalar' && value.text}
+            {value.kind === 'block' && <pre className="payload__block">{value.text}</pre>}
+            {value.kind === 'fields' && <PayloadFields fields={value.fields} />}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
