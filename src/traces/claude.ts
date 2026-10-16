@@ -446,7 +446,10 @@ class ClaudeSession implements ProviderSession {
         if (text) output.push(responseMessage('user', text, timestamp));
       }
       addUsage(messageUsage, rawId(value, message, this.identity.agentId, index));
-      if (type === 'user' && value.toolUseResult !== undefined) {
+      // Claude Code also stores a structured toolUseResult copy of the result
+      // already present as a tool_result block. That copy has no tool_use_id,
+      // so it is only used when the message carries no result block.
+      if (type === 'user' && value.toolUseResult !== undefined && !blocks.some((block) => block.kind === 'tool-result')) {
         const toolUseResult = isObject(value.toolUseResult) ? value.toolUseResult : { output: value.toolUseResult };
         const id = firstString(toolUseResult, ['toolCallId', 'tool_use_id', 'toolUseId', 'call_id', 'callId'])
           ?? firstString(value, ['toolUseId', 'tool_use_id', 'toolCallId']);

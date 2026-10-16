@@ -108,6 +108,73 @@ test('Claude normalization preserves identity, thinking, paired tools, per-messa
   assert.equal(call.reasoningEffort, 'medium');
 });
 
+test('Claude tool results are not duplicated by the structured toolUseResult copy', () => {
+  const toolUse = (id: string, name: string, input: unknown) => ({
+    type: 'assistant',
+    sessionId: 'claude-root',
+    uuid: `assistant-${id}`,
+    message: { id: `message-${id}`, role: 'assistant', content: [{ type: 'tool_use', id, name, input }] },
+  });
+  // Claude Code stores each result twice: the content block the model saw,
+  // and a structured toolUseResult copy that carries no tool_use_id.
+  const values = [
+    toolUse('bash-1', 'Bash', { command: 'ls', description: 'List files' }),
+    {
+      type: 'user',
+      sessionId: 'claude-root',
+      uuid: 'user-bash-1',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'bash-1', content: 'file-a\nfile-b' }] },
+      toolUseResult: { stdout: 'file-a\nfile-b', stderr: '', interrupted: false, isImage: false, noOutputExpected: false },
+    },
+    toolUse('edit-1', 'Edit', { file_path: '/workspace/a.ts', old_string: 'a', new_string: 'b' }),
+    {
+      type: 'user',
+      sessionId: 'claude-root',
+      uuid: 'user-edit-1',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'edit-1', content: 'The file has been updated.' }] },
+      toolUseResult: { type: 'update', filePath: '/workspace/a.ts', content: 'b', originalFile: 'a', structuredPatch: [], userModified: false },
+    },
+    toolUse('bash-2', 'Bash', { command: 'false' }),
+    {
+      type: 'user',
+      sessionId: 'claude-root',
+      uuid: 'user-bash-2',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'bash-2', content: 'Exit code 1', is_error: true }] },
+      toolUseResult: 'Error: Exit code 1',
+    },
+  ];
+  const session = createClaudeSession(values[0], '/tmp/.claude/projects/demo/claude-root.jsonl');
+  assert(session);
+  const observation = new CodexAdapter().inspect(canonical(session, values), { tracePath: '/tmp/claude-root.jsonl' });
+  assert(observation);
+
+  const results = observation.entries.filter((entry) => entry.kind === 'tool-result' || (entry.kind === 'error' && entry.callId));
+  assert.deepEqual(results.map((entry) => [entry.callId, entry.kind, entry.text]), [
+    ['bash-1', 'tool-result', 'file-a\nfile-b'],
+    ['edit-1', 'tool-result', 'The file has been updated.'],
+    ['bash-2', 'error', 'Exit code 1'],
+  ]);
+  assert.equal(observation.entries.filter((entry) => entry.kind === 'error' && !entry.callId).length, 0);
+});
+
+test('Claude toolUseResult without a matching content block still produces a result', () => {
+  const values = [
+    {
+      type: 'assistant',
+      sessionId: 'claude-root',
+      uuid: 'assistant-1',
+      message: { id: 'message-1', role: 'assistant', content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'ls' } }] },
+    },
+    { type: 'user', sessionId: 'claude-root', uuid: 'user-1', toolUseId: 'tool-1', message: { role: 'user', content: [] }, toolUseResult: { output: 'file-a' } },
+  ];
+  const session = createClaudeSession(values[0], '/tmp/.claude/projects/demo/claude-root.jsonl');
+  assert(session);
+  const observation = new CodexAdapter().inspect(canonical(session, values), { tracePath: '/tmp/claude-root.jsonl' });
+  assert(observation);
+  const results = observation.entries.filter((entry) => entry.kind === 'tool-result');
+  assert.deepEqual(results.map((entry) => [entry.callId, entry.text]), [['tool-1', 'file-a']]);
+});
+
 test('Claude nested subagent identity comes from its path and ignores message parentUuid lineage', () => {
   const child = {
     type: 'assistant',
