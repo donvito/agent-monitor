@@ -300,6 +300,20 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--focus); ou
 .run-item__title strong { color: var(--run-title); font-size: 13px; font-weight: 600; }
 .run-item__title span { color: var(--dim); font-size: 12px; }
 .run-item__path { max-width: none; overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.run-item__path { display: flex; align-items: center; gap: 6px; }
+.run-item__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-item__pencil { display: inline-grid; flex: none; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--dim); opacity: .5; cursor: pointer; transition: opacity 150ms ease, color 150ms ease, background 150ms ease; }
+.run-item:hover .run-item__pencil { opacity: 1; }
+.run-item__pencil:hover { color: var(--accent); background: var(--accent-wash); }
+.run-item__name { display: block; overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.run-item--editing { cursor: default; }
+.run-item__rename { width: 100%; min-width: 0; margin: 1px 0; padding: 2px 6px; border: 1px solid var(--focus); border-radius: 5px; outline: none; color: var(--text); background: var(--surface); box-shadow: 0 0 0 2px var(--accent-wash); font: inherit; }
+.run-title-popup { position: fixed; z-index: 200; display: grid; gap: 2px; max-width: 300px; padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--panel-bg); box-shadow: 0 14px 34px var(--shadow-heavy); font-size: 12px; line-height: 1.45; pointer-events: none; }
+.run-title-popup__label { color: var(--dim); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.run-title-popup__label + div { margin-bottom: 5px; overflow-wrap: anywhere; }
+.run-title-popup__label + div:last-child { margin-bottom: 0; }
+.run-title-popup__empty { color: var(--muted); font-style: italic; }
+.run-title-popup__path { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .run-item__meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .run-item__time { color: var(--dim); font-size: 12px; white-space: nowrap; }
 .run-item__tokens { min-width: 0; overflow: hidden; color: var(--list-value); font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }

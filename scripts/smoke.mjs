@@ -131,6 +131,8 @@ async function runButton(page, cwdName) {
   return waitFor(`the run selector for ${cwdName}`, async () => {
     const candidates = [
       page.locator('button.run-item').filter({ has: page.getByTitle(runName) }).first(),
+      // The folder line carries the run's working directory; its popup replaces the old title tooltip.
+      page.locator('button.run-item').filter({ has: page.locator(`[data-cwd$="/${cwdName}"]`) }).first(),
       page.locator('button.run-item').filter({ hasText: cwdName }).first(),
       page.locator('[data-testid="run-item"]').filter({ hasText: cwdName }).first(),
       page.getByRole('button', { name: runName }).first(),

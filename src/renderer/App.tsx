@@ -13,6 +13,7 @@ import {
   Play,
   Radio,
   RefreshCw,
+  Pencil,
   Search,
   SquareArrowOutUpRight,
   Target,
@@ -878,7 +879,45 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
   );
 }
 
-function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, onDemo, usingDemo, watching, errors, loadingRunId }: { runs: AgentRun[]; agents: Agent[]; selectedRunId?: string; loadedRunId?: string; runTokenSummaries: Record<string, RunTokenSummary>; onSelectRun: (id: string) => void; onDemo: () => void; usingDemo: boolean; watching: boolean; errors: string[]; loadingRunId?: string }) {
+function folderName(run: AgentRun) {
+  return run.title || run.cwd?.split('/').filter(Boolean).pop() || 'Current workspace';
+}
+
+/** Delay before the agent's title appears, so passing over the list does not flash popups. */
+const TITLE_POPUP_DELAY_MS = 350;
+
+function Sidebar({ runs, runNames, onRename, agents, selectedRunId, loadedRunId, runTokenSummaries, onSelectRun, onDemo, usingDemo, watching, errors, loadingRunId }: { runs: AgentRun[]; runNames: Record<string, string>; onRename: (runId: string, name: string) => void; agents: Agent[]; selectedRunId?: string; loadedRunId?: string; runTokenSummaries: Record<string, RunTokenSummary>; onSelectRun: (id: string) => void; onDemo: () => void; usingDemo: boolean; watching: boolean; errors: string[]; loadingRunId?: string }) {
+  const [editingRunId, setEditingRunId] = useState<string>();
+  // Agent titles by run id: a string, '' when the agent gave none.
+  const [agentTitles, setAgentTitles] = useState<Record<string, string>>({});
+  const [hoveredTitle, setHoveredTitle] = useState<{ run: AgentRun; left: number; top: number }>();
+  const titleTimer = useRef<number>(undefined);
+  function showTitle(run: AgentRun, element: HTMLElement) {
+    window.clearTimeout(titleTimer.current);
+    titleTimer.current = window.setTimeout(() => {
+      const box = element.getBoundingClientRect();
+      setHoveredTitle({ run, left: box.left, top: box.bottom + 6 });
+      if (run.id in agentTitles) return;
+      const request = window.agentMonitor?.getRunTitle(run.id) ?? Promise.resolve(undefined);
+      void request.catch(() => undefined).then((title) => setAgentTitles((previous) => ({ ...previous, [run.id]: title ?? '' })));
+    }, TITLE_POPUP_DELAY_MS);
+  }
+  /** The name and folder lines both show the agent's title on hover and start renaming on double-click. */
+  function titleTarget(run: AgentRun) {
+    return {
+      onMouseEnter: (event: React.MouseEvent<HTMLElement>) => showTitle(run, event.currentTarget),
+      onMouseLeave: hideTitle,
+      onDoubleClick: (event: React.MouseEvent<HTMLElement>) => {
+        event.preventDefault();
+        hideTitle();
+        setEditingRunId(run.id);
+      },
+    };
+  }
+  function hideTitle() {
+    window.clearTimeout(titleTimer.current);
+    setHoveredTitle(undefined);
+  }
   const watcherTitle = usingDemo ? 'Demo stream' : watching ? 'Trace watcher' : 'Watcher paused';
   const watcherSubtitle = usingDemo ? 'sample data loaded' : errors.length ? `${errors.length} monitor issue${errors.length === 1 ? '' : 's'}` : watching ? 'listening locally' : 'monitor connected';
   return (
@@ -902,10 +941,40 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
                   ? 'This token total is from the last loaded snapshot; the run has since updated.'
                   : 'Input plus output tokens from the last loaded snapshot.'
                 : 'Load this run to see input plus output tokens.';
-            return <button key={run.id} type="button" className={`run-item ${selected ? 'run-item--selected' : ''} ${loading ? 'run-item--loading' : ''}`} onClick={() => onSelectRun(run.id)} aria-busy={loading}>
+            const editing = run.id === editingRunId;
+            const body = <>
               <span className="run-item__body">
                 <span className="run-item__title"><strong>{providerLabel(run.harness)}</strong><span>{runAgentCount(run, agents)} agents</span></span>
-                <span className="run-item__path" title={run.cwd || run.title || 'Current workspace'}>{run.title || run.cwd?.split('/').filter(Boolean).pop() || 'Current workspace'}</span>
+                {editing
+                  ? <input className="run-item__rename" aria-label="Run name" defaultValue={runNames[run.id] ?? ''} placeholder="Name this run" autoFocus spellCheck={false}
+                      onFocus={(event) => event.currentTarget.select()}
+                      onBlur={() => setEditingRunId(undefined)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          onRename(run.id, event.currentTarget.value);
+                          setEditingRunId(undefined);
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setEditingRunId(undefined);
+                        }
+                      }} />
+                  : runNames[run.id] && <span className="run-item__name" {...titleTarget(run)}>{runNames[run.id]}</span>}
+                <span className="run-item__path" data-cwd={run.cwd} {...titleTarget(run)}>
+                  <span className="run-item__label">{folderName(run)}</span>
+                  {!runNames[run.id] && !editing && (
+                    // A span, not a button: it sits inside the run's button. Clicking it names the run without opening it.
+                    <span className="run-item__pencil" aria-label="Name this run" title="Name this run"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        hideTitle();
+                        setEditingRunId(run.id);
+                      }}>
+                      <Pencil size={12} aria-hidden="true" />
+                    </span>
+                  )}
+                </span>
                 <span className="run-item__meta">
                   <span className="run-item__time">{loading ? 'loading agents…' : formatRelative(run.lastActivityAt ?? run.startedAt)}</span>
                   <span className={`run-item__tokens ${!summary && !loaded ? 'run-item__tokens--unknown' : ''} ${stale ? 'run-item__tokens--stale' : ''}`} title={tokenTitle}>
@@ -914,10 +983,26 @@ function Sidebar({ runs, agents, selectedRunId, loadedRunId, runTokenSummaries, 
                 </span>
               </span>
               <span className={`run-item__signal ${selected ? 'run-item__signal--active' : ''}`} />
-            </button>;
+            </>;
+            const className = `run-item ${selected ? 'run-item--selected' : ''} ${loading ? 'run-item--loading' : ''}`;
+            // An input cannot sit inside a button, so a run being renamed renders as a plain block.
+            if (editing) return <div key={run.id} className={`${className} run-item--editing`}>{body}</div>;
+            return <button key={run.id} type="button" className={className} onClick={() => onSelectRun(run.id)} aria-busy={loading}>{body}</button>;
           })}
         </div>
         {!runs.length && <div className="sidebar__empty">No runs discovered yet.</div>}
+        {hoveredTitle && (
+          <div className="run-title-popup" role="tooltip" style={{ left: hoveredTitle.left, top: hoveredTitle.top }}>
+            {/* The name is shown only once the agent title is known and differs from it, so it neither repeats nor flickers. */}
+            {runNames[hoveredTitle.run.id] && hoveredTitle.run.id in agentTitles && runNames[hoveredTitle.run.id] !== agentTitles[hoveredTitle.run.id]
+              && <><div className="run-title-popup__label">Name</div><div>{runNames[hoveredTitle.run.id]}</div></>}
+            <div className="run-title-popup__label">Agent title</div>
+            <div className={agentTitles[hoveredTitle.run.id] ? '' : 'run-title-popup__empty'}>
+              {hoveredTitle.run.id in agentTitles ? agentTitles[hoveredTitle.run.id] || 'No title from the agent' : 'Loading…'}
+            </div>
+            {hoveredTitle.run.cwd && <><div className="run-title-popup__label">Folder</div><div className="run-title-popup__path">{hoveredTitle.run.cwd}</div></>}
+          </div>
+        )}
       </div>
       <div className="sidebar__bottom"><div className="sidebar__watching"><span className={`watching-dot ${usingDemo ? 'watching-dot--demo' : ''} ${!usingDemo && errors.length ? 'watching-dot--warning' : ''}`} /><div><strong>{watcherTitle}</strong><span>{watcherSubtitle}</span></div><button type="button" title="Load demo stream" onClick={onDemo}>Demo</button></div><div className="sidebar__tip"><span>Click an agent to inspect its normalized trace.</span></div></div>
     </aside>
@@ -928,6 +1013,29 @@ function App() {
   const [traceTabs, setTraceTabs] = useState<Agent[]>([]);
   const [activeTraceId, setActiveTraceId] = useState<string | null>(null);
   const [runTokenSummaries, setRunTokenSummaries] = useState<Record<string, RunTokenSummary>>({});
+  const [runNames, setRunNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    void window.agentMonitor?.getRunNames().then(setRunNames, () => undefined);
+  }, []);
+  // Names the agents keep (Codex thread names, names given in Claude Code); the reader's own names win.
+  const [agentNames, setAgentNames] = useState<Record<string, string>>({});
+  const shownNames = useMemo(() => ({ ...agentNames, ...runNames }), [agentNames, runNames]);
+  const renameRun = useCallback((runId: string, name: string) => {
+    // Saving the agent's name unchanged keeps following the agent instead of storing a copy.
+    if (!runNames[runId] && name.trim() === (agentNames[runId] ?? '')) return;
+    const bridge = window.agentMonitor;
+    if (!bridge) {
+      // Without the native monitor (demo in a browser) names last for this session only.
+      setRunNames((previous) => {
+        const next = { ...previous };
+        if (name.trim()) next[runId] = name.trim();
+        else delete next[runId];
+        return next;
+      });
+      return;
+    }
+    void bridge.renameRun(runId, name).then(setRunNames, () => undefined);
+  }, [agentNames, runNames]);
   const openTrace = useCallback((agent: Agent) => {
     setTraceTabs(tabs => tabs.some(tab => tab.id === agent.id) ? tabs : [...tabs, agent]);
     setActiveTraceId(agent.id);
@@ -940,6 +1048,13 @@ function App() {
     if (activeTraceId === id) setActiveTraceId(null);
   };
   const { snapshot: sourceSnapshot, mode, setDemo, setLive, usingDemo, loadedRunId, loadingRunId, runLoadError, loadRun } = useMonitorSnapshot();
+  useEffect(() => {
+    const bridge = window.agentMonitor;
+    if (!bridge || !sourceSnapshot.runs.length) return;
+    // The monitor caches agent names by file, so refreshing after snapshot changes is cheap.
+    const timer = window.setTimeout(() => void bridge.getAgentNames().then(setAgentNames, () => undefined), 1_000);
+    return () => window.clearTimeout(timer);
+  }, [sourceSnapshot]);
   const { providerFilter, selectedRunId, selectedAgentId, setProviderFilter, selectRun, selectAgent } = useDashboardStore();
 
   const runs = useMemo(() => [...sourceSnapshot.runs].filter((run) => providerFilter === 'all' || run.harness === providerFilter).sort(runSort), [providerFilter, sourceSnapshot.runs]);
@@ -1038,7 +1153,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      {!expandedAgent && <Sidebar runs={runs} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} onDemo={handleDemo} usingDemo={usingDemo} watching={sourceSnapshot.watching} errors={sourceSnapshot.errors} loadingRunId={loadingRunId} />}
+      {!expandedAgent && <Sidebar runs={runs} runNames={shownNames} onRename={renameRun} agents={agents} selectedRunId={selectedRun?.id} loadedRunId={loadedRunId} runTokenSummaries={runTokenSummaries} onSelectRun={handleRunSelect} onDemo={handleDemo} usingDemo={usingDemo} watching={sourceSnapshot.watching} errors={sourceSnapshot.errors} loadingRunId={loadingRunId} />}
       <main className="workspace">
         <header className="topbar"><div className="topbar__context"><span className="topbar__section-label">Workspace</span><span className="topbar__slash">/</span><span className="topbar__current">{selectedRun?.cwd?.split('/').filter(Boolean).pop() || 'Agent activity'}</span></div><div className="topbar__controls"><ThemeSelector /><Dropdown label="Provider" value={providerFilter} options={PROVIDERS.map(provider => ({ value: provider.value, label: provider.label }))} onChange={value => setProviderFilter(value as ProviderFilter)} /><Dropdown label="Run" value={selectedRun?.id ?? ''} placeholder="Select a run" wide options={runs.map(run => ({ value: run.id, label: run.title || run.cwd?.split('/').filter(Boolean).pop() || 'workspace', description: `${providerLabel(run.harness)} · ${runAgentCount(run, agents)} agents · ${formatRelative(run.lastActivityAt ?? run.startedAt)}` }))} onChange={handleRunSelect} /><span className={`live-badge live-badge--${mode} ${monitorHasErrors ? 'live-badge--warning' : ''}`}>{isWatching ? <Radio size={13} className="live-badge__radio" /> : monitorHasErrors ? <TriangleAlert size={13} /> : <CircleDot size={13} />}{statusLabel}</span>{usingDemo && <button type="button" className="button button--tiny" onClick={handleReturnLive} disabled={!window.agentMonitor}>Return to live</button>}</div></header>
         {traceTabs.length > 0 && <div className="workspace-tabs" role="tablist" aria-label="Workspace views" onKeyDown={event => {
