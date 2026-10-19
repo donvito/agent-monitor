@@ -324,7 +324,9 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--focus); ou
 .mac-titlebar .brand { min-height: 57px; padding-left: 92px; }
 .mac-titlebar .brand, .mac-titlebar .topbar, .mac-titlebar .workspace-tabs { -webkit-app-region: drag; user-select: none; }
 .mac-titlebar .topbar :is(button, input, select, a, .dropdown, .live-badge), .mac-titlebar .workspace-tabs :is(button, [role='tab']) { -webkit-app-region: no-drag; }
-.mac-titlebar .app-shell > .workspace:first-child .topbar { padding-left: 92px; }
+/* A hidden run list stays mounted to keep its scroll, so the workspace may follow it. */
+.sidebar--hidden { display: none; }
+.mac-titlebar .app-shell > .workspace:first-child .topbar, .mac-titlebar .app-shell > .sidebar--hidden + .workspace .topbar { padding-left: 92px; }
 .workspace { container-type: inline-size; display: flex; min-width: 0; flex: 1; flex-direction: column; height: 100%; background: var(--bg); }
 .topbar { display: flex; align-items: center; justify-content: space-between; min-height: 57px; padding: 0 24px; border-bottom: 1px solid var(--border); background: var(--topbar-bg); }
 .topbar__context { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
