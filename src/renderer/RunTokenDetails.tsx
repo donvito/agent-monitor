@@ -4,6 +4,7 @@ import type { Agent } from '../shared/types';
 import { estimateAgentCost, estimateModelCosts, PRICING_VERIFIED_AT, UNATTRIBUTED_MODEL, type ModelCostRow } from '../shared/pricing';
 import { RollingNumber, RollingText } from './RollingNumber';
 import { TokenUsageCharts } from './TokenUsageCharts';
+import { costLabel, unpricedNote } from './costText';
 
 const exact = (value: number) => value.toLocaleString();
 
@@ -27,11 +28,6 @@ function usdShort(value: number) {
   return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function modelCostLabel(row: ModelCostRow) {
-  if (row.complete) return usd(row.knownUsd);
-  return row.knownUsd > 0 ? usd(row.knownUsd) : 'Unknown';
-}
-
 function modelCostNote(row: ModelCostRow) {
   if (row.complete) return `Rates verified ${PRICING_VERIFIED_AT}.`;
   const prefix = row.knownUsd > 0 ? `Known subtotal only; ${exact(row.unpricedTokens)} tokens unpriced.` : `${exact(row.unpricedTokens)} tokens unpriced.`;
@@ -40,17 +36,19 @@ function modelCostNote(row: ModelCostRow) {
 
 type AgentCost = ReturnType<typeof estimateAgentCost>;
 
-function costLabel(cost: AgentCost) {
-  if (cost.complete && cost.usd !== null) return usd(cost.usd);
-  return cost.knownUsd > 0 ? usd(cost.knownUsd) : 'Unknown';
-}
-
 function costNote(cost: AgentCost) {
   if (cost.notes.length) return cost.notes.join(' ');
   return cost.complete
     ? `Rates verified ${PRICING_VERIFIED_AT}.`
     : 'Known subtotal only; some model rates or cache token metadata are unavailable.';
 }
+
+function agentCostLabel(cost: AgentCost | undefined) {
+  return cost ? costLabel(cost.knownUsd, cost.complete && cost.usd !== null, usd) : 'Unknown';
+}
+
+/** Appends the list of unpriced models, when there is one, to a tooltip. */
+const withUnpriced = (text: string, note: string) => note ? `${text}\n${note}` : text;
 
 export function RunTokenDetails({ agents }: { agents: Agent[] }) {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -65,8 +63,11 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
     Number(b.type === 'main') - Number(a.type === 'main')
     || (b.stats.inputTokens + b.stats.outputTokens) - (a.stats.inputTokens + a.stats.outputTokens)
     || a.id.localeCompare(b.id));
-  const costs = agents.map((agent) => ({ agent, cost: estimateAgentCost(agent) }));
-  const costByAgentId = new Map(costs.map(({ agent, cost }) => [agent.id, cost]));
+  const costs = agents.map((agent) => {
+    const cost = estimateAgentCost(agent);
+    return { agent, cost, note: withUnpriced(costNote(cost), unpricedNote(estimateModelCosts([agent]))) };
+  });
+  const costByAgentId = new Map(costs.map((entry) => [entry.agent.id, entry]));
   const totalCost = costs.reduce((sum, { cost }) => ({
     knownUsd: sum.knownUsd + cost.knownUsd,
     unpricedTokens: sum.unpricedTokens + cost.unpricedTokens,
@@ -75,16 +76,14 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
   const totalTokens = totals.input + totals.output;
   const pricedTokens = totalTokens - totalCost.unpricedTokens;
   const perMillion = totalCost.knownUsd > 0 && pricedTokens > 0 ? totalCost.knownUsd / pricedTokens * 1_000_000 : undefined;
-  const totalCostLabel = totalCost.complete
-    ? usd(totalCost.knownUsd)
-    : totalCost.knownUsd > 0
-      ? usd(totalCost.knownUsd)
-      : 'Unknown';
-  const totalCostNote = totalCost.complete
+  const totalCostLabel = costLabel(totalCost.knownUsd, totalCost.complete, usd);
+  const totalCostShort = costLabel(totalCost.knownUsd, totalCost.complete, usdShort);
+  const totalCostNote = withUnpriced(totalCost.complete
     ? `Rates verified ${PRICING_VERIFIED_AT}.`
     : totalCost.knownUsd > 0
       ? `Known subtotal from priced usage. ${totalCost.unpricedTokens.toLocaleString()} tokens have no verified rate or complete cache metadata.`
-      : `No priced usage is available. ${totalCost.unpricedTokens.toLocaleString()} tokens have no verified rate or complete cache metadata.`;
+      : `No priced usage is available. ${totalCost.unpricedTokens.toLocaleString()} tokens have no verified rate or complete cache metadata.`,
+    unpricedNote(modelRows));
 
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
@@ -117,7 +116,7 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
         </span>
         <span className="run-token-totals__stat run-token-totals__stat--usd" title={`${totalCostLabel} API token estimate (USD). ${totalCostNote}`}>
           <span className="run-token-totals__label">Est. cost</span>
-          <strong><RollingText text={totalCost.knownUsd > 0 ? usdShort(totalCost.knownUsd) : totalCostLabel} /></strong>
+          <strong><RollingText text={totalCostShort} /></strong>
         </span>
         <span className="run-token-totals__details">Details<ChevronDown size={14} aria-hidden="true" /></span>
       </summary>
@@ -147,7 +146,7 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
           </div>
           <div className="token-breakdown__tile token-breakdown__tile--cost" title={`${totalCostLabel}. ${totalCostNote}`}>
             <span>Estimated cost</span>
-            <strong><RollingText text={totalCost.knownUsd > 0 ? usdShort(totalCost.knownUsd) : totalCostLabel} /></strong>
+            <strong><RollingText text={totalCostShort} /></strong>
             <small>{perMillion ? `≈ ${usd(perMillion)} per 1M priced tokens` : 'API token estimate (USD)'}</small>
           </div>
         </div>
@@ -166,7 +165,7 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
             <thead><tr><th scope="col">Agent</th><th scope="col">IN</th><th scope="col">OUT</th><th scope="col" title={`API token estimate (USD). ${totalCostNote}`}>USD</th></tr></thead>
             <tbody>{rows.map(agent => <tr key={agent.id}>
               <th scope="row" title={agent.id}><strong>{agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : `Subagent · ${agent.id.slice(-8)}`)}</strong><span>{agent.type === 'main' ? 'Main' : agent.role || 'Subagent'} · {agent.model || 'Unknown model'}</span></th>
-              <td><RollingNumber value={agent.stats.inputTokens} /></td><td><RollingNumber value={agent.stats.outputTokens} /></td><td className="token-breakdown__cost" title={costNote(costByAgentId.get(agent.id) as AgentCost)}><RollingText text={costLabel(costByAgentId.get(agent.id) as AgentCost)} /></td>
+              <td><RollingNumber value={agent.stats.inputTokens} /></td><td><RollingNumber value={agent.stats.outputTokens} /></td><td className="token-breakdown__cost" title={costByAgentId.get(agent.id)?.note}><RollingText text={agentCostLabel(costByAgentId.get(agent.id)?.cost)} /></td>
             </tr>)}</tbody>
             <tfoot><tr><th scope="row">Run total</th><td><RollingNumber value={totals.input} /></td><td><RollingNumber value={totals.output} /></td><td className="token-breakdown__cost" title={totalCostNote}><RollingText text={totalCostLabel} /></td></tr></tfoot>
           </table> : <table className="token-breakdown__models">
@@ -181,7 +180,7 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
                 </th>
                 <td><RollingNumber value={row.inputTokens} /><span className="token-breakdown__sub">{row.inputTokens ? `${share(row.cacheReadTokens, row.inputTokens)} cached` : '—'}</span></td>
                 <td><RollingNumber value={row.outputTokens} /></td>
-                <td className={`token-breakdown__cost ${row.complete ? '' : 'token-breakdown__cost--partial'}`} title={modelCostNote(row)}><RollingText text={modelCostLabel(row)} /></td>
+                <td className={`token-breakdown__cost ${row.complete ? '' : 'token-breakdown__cost--partial'}`} title={modelCostNote(row)}><RollingText text={costLabel(row.knownUsd, row.complete, usd)} /></td>
                 <td className="token-breakdown__share" aria-label={`${share(row.knownUsd, totalCost.knownUsd)} of estimated cost`}>
                   <span className="token-breakdown__bar"><span style={{ width: `${Math.max(costShare > 0 ? 2 : 0, costShare * 100)}%` }} /></span>
                   <span>{row.knownUsd > 0 ? share(row.knownUsd, totalCost.knownUsd) : '—'}</span>
