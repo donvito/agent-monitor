@@ -121,7 +121,8 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
         </span>
         <span className="run-token-totals__details">Details<ChevronDown size={14} aria-hidden="true" /></span>
       </summary>
-      <section className="token-breakdown" aria-labelledby={titleId}>
+      {/* Focusable so a click on plain text inside keeps focus here and Escape still reaches the handler. */}
+      <section className="token-breakdown" aria-labelledby={titleId} tabIndex={-1}>
         <header>
           <div>
             <h2 id={titleId}>Token breakdown</h2>
