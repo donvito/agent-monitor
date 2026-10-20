@@ -445,7 +445,12 @@ function computeDagrePositions(agents: Agent[], edges: AgentEdge[]) {
   graph.setDefaultEdgeLabel(() => ({}));
   graph.setGraph({ rankdir: 'TB', ranksep: 104, nodesep: 58, marginx: 28, marginy: 24 });
   agents.forEach((agent) => graph.setNode(agent.id, { width: NODE_WIDTH, height: NODE_HEIGHT }));
-  edges.forEach((edge) => {
+  // Agents arrive in file discovery order (newest first for Codex). dagre places the sibling
+  // whose edge was added last leftmost, so add edges latest launch first to read left to right.
+  const launched = [...agents].sort((a, b) =>
+    (a.createdAt ?? Number.POSITIVE_INFINITY) - (b.createdAt ?? Number.POSITIVE_INFINITY) || a.id.localeCompare(b.id));
+  const order = new Map(launched.map((agent, index) => [agent.id, index]));
+  [...edges].sort((a, b) => (order.get(b.target) ?? 0) - (order.get(a.target) ?? 0)).forEach((edge) => {
     if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) graph.setEdge(edge.source, edge.target);
   });
   dagre.layout(graph);
