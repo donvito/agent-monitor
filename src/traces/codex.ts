@@ -588,8 +588,9 @@ export class CodexAdapter {
       ...(model ? { model } : {}),
       ...(provider ? { provider } : {}),
       ...(effort ? { reasoningEffort: effort } : {}),
-      ...(firstString(meta, ['agent_role', 'agentRole']) ? { role: firstString(meta, ['agent_role', 'agentRole']) } : {}),
+      ...(subagentRole(meta) ? { role: subagentRole(meta) } : {}),
       ...(firstString(meta, ['agent_nickname', 'agentNickname']) ? { nickname: firstString(meta, ['agent_nickname', 'agentNickname']) } : {}),
+      ...(firstString(meta, ['agent_description', 'agentDescription']) ? { description: firstString(meta, ['agent_description', 'agentDescription']) } : {}),
       ...(firstString(meta, ['agent_path', 'agentPath']) ? { agentPath: firstString(meta, ['agent_path', 'agentPath']) } : {}),
       ...(cwd ? { cwd } : {}),
       ...(tracePath ? { tracePath } : {}),
@@ -639,6 +640,18 @@ export function getCodexMeta(records: Array<TraceRecord | unknown>): JsonObject 
   return sessionMeta(normaliseRecords(records));
 }
 
+/**
+ * The role a Codex subagent was spawned with. Subagents Codex starts itself, such as
+ * guardian reviews of risky actions, name their kind only in `source.subagent.other`.
+ */
+function subagentRole(meta: JsonObject): string | undefined {
+  const role = firstString(meta, ['agent_role', 'agentRole']);
+  if (role) return role;
+  const source = isObject(meta.source) ? meta.source : undefined;
+  const subagent = isObject(source?.subagent) ? source.subagent : undefined;
+  return firstString(subagent, ['other']);
+}
+
 export function codexTraceInfo(payload: unknown): {
   id?: string;
   type: AgentType;
@@ -655,7 +668,7 @@ export function codexTraceInfo(payload: unknown): {
     type: traceType(threadSource),
     ...(threadSource ? { threadSource } : {}),
     ...(firstString(meta, ['parent_thread_id', 'parentThreadId']) ? { parentThreadId: firstString(meta, ['parent_thread_id', 'parentThreadId']) } : {}),
-    ...(firstString(meta, ['agent_role', 'agentRole']) ? { agentRole: firstString(meta, ['agent_role', 'agentRole']) } : {}),
+    ...(subagentRole(meta) ? { agentRole: subagentRole(meta) } : {}),
     ...(firstString(meta, ['agent_path', 'agentPath']) ? { agentPath: firstString(meta, ['agent_path', 'agentPath']) } : {}),
     ...(firstString(meta, ['agent_nickname', 'agentNickname']) ? { agentNickname: firstString(meta, ['agent_nickname', 'agentNickname']) } : {}),
   };

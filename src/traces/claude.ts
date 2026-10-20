@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import {
   codexUsage,
   contentText,
@@ -34,6 +35,7 @@ interface ClaudeIdentity {
   effort?: string;
   role?: string;
   nickname?: string;
+  description?: string;
   agentPath: string;
 }
 
@@ -165,6 +167,23 @@ function isSubagentRecord(value: JsonObject, parent: string | undefined): boolea
     || type === 'subagent' || type === 'agent';
 }
 
+/**
+ * Claude Code writes `agent-<id>.meta.json` next to a subagent's trace, with the
+ * agent type it was launched as and the task it was given.
+ */
+function subagentMeta(tracePath: string): { role?: string; description?: string } {
+  if (!/\.jsonl$/i.test(tracePath)) return {};
+  try {
+    const meta = parseJson(readFileSync(tracePath.replace(/\.jsonl$/i, '.meta.json'), 'utf8'));
+    if (!isObject(meta)) return {};
+    const role = firstString(meta, ['agentType']);
+    const description = firstString(meta, ['description']);
+    return { ...(role ? { role } : {}), ...(description ? { description } : {}) };
+  } catch {
+    return {};
+  }
+}
+
 function deriveIdentity(value: JsonObject, tracePath: string, harness: ClaudeHarness): ClaudeIdentity {
   const message = messageOf(value);
   const nested = nestedClaudeAgent(tracePath);
@@ -197,6 +216,8 @@ function deriveIdentity(value: JsonObject, tracePath: string, harness: ClaudeHar
     ?? firstString(value, ['effort', 'reasoning_effort', 'reasoningEffort', 'thinkingLevel', 'thinking_level']);
   const cwd = firstString(value, ['cwd', 'working_directory', 'workingDirectory'])
     ?? firstString(message, ['cwd', 'working_directory', 'workingDirectory']);
+  const meta = nested ? subagentMeta(tracePath) : {};
+  const role = firstString(value, ['agentRole', 'agent_role']) ?? meta.role;
 
   return {
     harness,
@@ -209,7 +230,8 @@ function deriveIdentity(value: JsonObject, tracePath: string, harness: ClaudeHar
     ...(provider ? { provider } : {}),
     ...(serviceTier ? { serviceTier } : {}),
     ...(effort ? { effort } : {}),
-    ...(firstString(value, ['agentRole', 'agent_role']) ? { role: firstString(value, ['agentRole', 'agent_role']) } : {}),
+    ...(role ? { role } : {}),
+    ...(meta.description ? { description: meta.description } : {}),
     ...(firstString(value, ['agentNickname', 'agent_nickname']) ? { nickname: firstString(value, ['agentNickname', 'agent_nickname']) } : {}),
     agentPath: tracePath,
   };
@@ -229,6 +251,7 @@ function syntheticHeader(identity: ClaudeIdentity, value: JsonObject): JsonObjec
     ...(identity.effort ? { effort: identity.effort, reasoning_effort: identity.effort } : {}),
     ...(identity.role ? { agent_role: identity.role } : {}),
     ...(identity.nickname ? { agent_nickname: identity.nickname } : {}),
+    ...(identity.description ? { agent_description: identity.description } : {}),
     agent_path: identity.agentPath,
   };
   const timestamp = rawTimestamp(value, messageOf(value));

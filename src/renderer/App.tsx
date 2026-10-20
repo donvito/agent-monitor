@@ -61,6 +61,7 @@ import { Dropdown } from './Dropdown';
 import { TraceWorkspace } from './TraceWorkspace';
 import { RollingNumber } from './RollingNumber';
 import { RunTokenDetails } from './RunTokenDetails';
+import { agentLabels } from './agentLabels';
 import './TraceTabs.css';
 
 type SourceMode = 'loading' | 'live' | 'offline' | 'demo';
@@ -395,6 +396,7 @@ function useMonitorSnapshot() {
 
 type AgentNodeData = {
   agent: Agent;
+  name?: string;
   pulse: boolean;
   arrived: boolean;
   onOpenTrace?: (agent: Agent) => void;
@@ -459,10 +461,10 @@ function computeDagrePositions(agents: Agent[], edges: AgentEdge[]) {
 }
 
 function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
-  const { agent, pulse, arrived, onOpenTrace } = data;
+  const { agent, name, pulse, arrived, onOpenTrace } = data;
   const status = STATUS_META[agent.status];
   const StatusIcon = status.icon;
-  const displayName = agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : 'Subagent');
+  const displayName = name || (agent.type === 'main' ? 'Main agent' : 'Subagent');
   const model = agent.model || 'Model pending';
   const effort = agent.reasoningEffort || 'default';
   const isMain = agent.type === 'main';
@@ -633,6 +635,7 @@ function AgentGraph({ runId, agents, edges, selectedAgentId, onSelectAgent, onOp
       });
     }
 
+    const labels = agentLabels(visibleAgents);
     const flowNodes: AgentFlowNode[] = visibleAgents.map((agent) => {
       const dimensions = dimensionsRef.current[agent.id];
       return {
@@ -647,6 +650,7 @@ function AgentGraph({ runId, agents, edges, selectedAgentId, onSelectAgent, onOp
         ...(dimensions ? { measured: dimensions } : {}),
         data: {
           agent,
+          name: labels.get(agent.id),
           arrived: !knownAgentIdsRef.current.has(agent.id),
           pulse: pulseIds.has(agent.id),
           onOpenTrace,
@@ -811,7 +815,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div className="detail-metric"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClose: () => void; onExpand: (agent: Agent) => void; mode: SourceMode }) {
+function AgentDetails({ agent, name, onClose, onExpand, mode }: { agent?: Agent; name?: string; onClose: () => void; onExpand: (agent: Agent) => void; mode: SourceMode }) {
   const [trace, setTrace] = useState<TraceEntry[]>([]);
   const [loadingTrace, setLoadingTrace] = useState(false);
   const [traceError, setTraceError] = useState<string>();
@@ -862,7 +866,7 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
   if (!agent) return null;
   const status = STATUS_META[agent.status];
   const StatusIcon = status.icon;
-  const title = agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : 'Subagent');
+  const title = name || (agent.type === 'main' ? 'Main agent' : 'Subagent');
 
   return (
     <aside className="details-pane">
@@ -870,7 +874,7 @@ function AgentDetails({ agent, onClose, onExpand, mode }: { agent?: Agent; onClo
       <div className="details-pane__heading"><div><h2>{title}</h2><p>{agent.type === 'main' ? 'Root session' : agent.role || agent.type}</p></div><span className="details-status" style={{ color: status.color }}><StatusIcon size={14} />{status.label}</span></div>
       <div className="details-chip-row"><span className="chip chip--muted">{providerLabel(agent.harness)}</span><span className="chip chip--muted">{agent.model || 'Model pending'}</span><span className="chip chip--muted">{agent.reasoningEffort || 'default'}</span></div>
 
-      <section className="details-section"><div className="details-section__label">Session metadata</div><dl className="details-list"><div><dt>Harness</dt><dd>{providerLabel(agent.harness)}</dd></div><div><dt>Provider</dt><dd>{agent.provider || '—'}</dd></div><div><dt>Role</dt><dd>{agent.role || agent.type}</dd></div><div><dt>Last activity</dt><dd>{formatRelative(agent.lastActivityAt)}</dd></div><div><dt>Duration</dt><dd>{formatDuration(agent.createdAt)}</dd></div></dl></section>
+      <section className="details-section"><div className="details-section__label">Session metadata</div><dl className="details-list"><div><dt>Harness</dt><dd>{providerLabel(agent.harness)}</dd></div><div><dt>Provider</dt><dd>{agent.provider || '—'}</dd></div><div><dt>Role</dt><dd>{agent.role || agent.type}</dd></div>{agent.description && <div><dt>Task</dt><dd>{agent.description}</dd></div>}<div><dt>Last activity</dt><dd>{formatRelative(agent.lastActivityAt)}</dd></div><div><dt>Duration</dt><dd>{formatDuration(agent.createdAt)}</dd></div></dl></section>
       <section className="details-section"><div className="details-section__label">Usage</div><div className="detail-metric-grid"><Metric label="Input" value={formatExactNumber(agent.stats.inputTokens)} /><Metric label="Output" value={formatExactNumber(agent.stats.outputTokens)} /><Metric label="Tool calls" value={formatExactNumber(agent.stats.toolCalls)} /><Metric label="Errors" value={formatExactNumber(agent.stats.errors)} /></div></section>
       <section className="details-section details-section--trace"><div className="details-section__title"><div><div className="details-section__label">Normalized trace</div><span>Live events from this session</span></div><button type="button" className="trace-open-button" title="Refresh trace" onClick={() => setRefreshNonce((value) => value + 1)}><RefreshCw size={13} /></button></div>{traceError ? <div className="trace-placeholder trace-placeholder--error"><AlertCircle size={14} />{traceError}</div> : <TraceList entries={trace} loading={loadingTrace} />}</section>
       <div className="details-pane__footer"><span><CircleDot size={11} />{agent.threadId ? `thread ${agent.threadId.slice(0, 12)}` : 'thread id unavailable'}</span><button type="button" className="button button--quiet" onClick={() => onExpand(agent)}>Open trace in tab</button></div>
@@ -945,6 +949,7 @@ function App() {
   const runs = useMemo(() => [...sourceSnapshot.runs].filter((run) => providerFilter === 'all' || run.harness === providerFilter).sort(runSort), [providerFilter, sourceSnapshot.runs]);
   const selectedRun = runs.find((run) => run.id === selectedRunId);
   const agents = useMemo(() => sourceSnapshot.agents.filter((agent) => providerFilter === 'all' || agent.harness === providerFilter), [providerFilter, sourceSnapshot.agents]);
+  const labels = useMemo(() => agentLabels(agents), [agents]);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
   const expandedAgent = activeTraceId ? agents.find(agent => agent.id === activeTraceId) ?? traceTabs.find(agent => agent.id === activeTraceId) : undefined;
 
@@ -1052,8 +1057,8 @@ function App() {
         }}>
           <button type="button" role="tab" className="workspace-tab" aria-selected={!activeTraceId} aria-controls="graph-panel" onClick={() => setActiveTraceId(null)}>Graph</button>
           {traceTabs.map(agent => <div className="workspace-tab-group" data-active={agent.id === activeTraceId} key={agent.id}>
-            <button type="button" role="tab" className="workspace-tab workspace-tab--trace" aria-selected={agent.id === activeTraceId} aria-controls="expanded-trace-panel" onClick={() => setActiveTraceId(agent.id)} title={agent.nickname || agent.role || 'Main agent'}>Trace · {agent.nickname || agent.role || 'Main agent'}</button>
-            <button type="button" className="workspace-tab-close" aria-label={`Close trace ${agent.nickname || agent.role || 'Main agent'}`} onClick={() => closeTrace(agent.id)}><X size={13} /></button>
+            <button type="button" role="tab" className="workspace-tab workspace-tab--trace" aria-selected={agent.id === activeTraceId} aria-controls="expanded-trace-panel" onClick={() => setActiveTraceId(agent.id)} title={labels.get(agent.id) || 'Main agent'}>Trace · {labels.get(agent.id) || 'Main agent'}</button>
+            <button type="button" className="workspace-tab-close" aria-label={`Close trace ${labels.get(agent.id) || 'Main agent'}`} onClick={() => closeTrace(agent.id)}><X size={13} /></button>
           </div>)}
         </div>}
         <div id="graph-panel" className="workspace-graph-view" style={expandedAgent ? { display: 'none' } : undefined}>
@@ -1063,7 +1068,7 @@ function App() {
           <section className={`canvas-panel ${selectedAgent ? 'canvas-panel--with-details' : ''}`}>
             {hasGraph ? <AgentGraph runId={selectedRun?.id} agents={runAgents} edges={runEdges} selectedAgentId={selectedAgentId} onSelectAgent={selectAgent} onOpenTrace={openTrace} /> : <EmptyGraph mode={mode} selectedRun={selectedRun} loading={Boolean(loadingRunId && loadingRunId === selectedRun?.id)} loadError={selectedRun?.id === selectedRunId ? runLoadError : undefined} onDemo={handleDemo} onRetry={selectedRun ? () => handleRunSelect(selectedRun.id) : undefined} />}
           </section>
-          {selectedAgent && <AgentDetails agent={selectedAgent} onClose={() => selectAgent(null)} onExpand={openTrace} mode={mode} />}
+          {selectedAgent && <AgentDetails agent={selectedAgent} name={labels.get(selectedAgent.id)} onClose={() => selectAgent(null)} onExpand={openTrace} mode={mode} />}
         </div>
         </div>
         {expandedAgent && <div id="expanded-trace-panel" role="tabpanel" aria-label="Expanded trace" className="workspace-trace-panel"><TraceWorkspace key={expandedAgent.id} agent={expandedAgent} agents={agents.filter(agent => agent.runId === expandedAgent.runId)} onOpenAgent={openTrace} onOpenAgents={openTraces} demo={usingDemo} /></div>}

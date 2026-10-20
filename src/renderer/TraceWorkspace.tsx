@@ -3,6 +3,7 @@ import { ArrowUpRight, Check, ChevronDown, ChevronRight, Copy, Home } from 'luci
 import type { Agent, AgentHarness, TraceEntry } from '../shared/types';
 import { Dropdown } from './Dropdown';
 import { Markdown } from './Markdown';
+import { agentLabels } from './agentLabels';
 import {
   conversationDuration,
   conversationUsage,
@@ -270,6 +271,7 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
         <div className="trace-workspace__list">
           <TraceHeader
             agent={agent}
+            parentName={parent ? agentLabels(agents).get(parent.id) : undefined}
             titleId={`${searchId}-title`}
             itemCount={entries.length}
             subagents={subagents}
@@ -350,8 +352,9 @@ export function TraceWorkspace({ agent, agents = [], onOpenAgent, onOpenAgents, 
   );
 }
 
-function TraceHeader({ agent, titleId, itemCount, subagents, parent, loading, onRefresh, onOpenAgent, onOpenAgents }: {
+function TraceHeader({ agent, titleId, itemCount, subagents, parent, parentName, loading, onRefresh, onOpenAgent, onOpenAgents }: {
   agent: Agent;
+  parentName?: string;
   titleId: string;
   itemCount: number;
   subagents: Agent[];
@@ -408,7 +411,7 @@ function TraceHeader({ agent, titleId, itemCount, subagents, parent, loading, on
               <span className="trace-hero__links-label">Parent</span>
               <button type="button" className="trace-link" onClick={() => onOpenAgent?.(parent)} disabled={!onOpenAgent} title={parent.tracePath}>
                 <span className="trace-link__tag">{parent.type === 'main' ? 'MAIN' : 'PARENT'}</span>
-                {parentFile || titleFor(parent)}
+                {parentFile || parentName || titleFor(parent)}
               </button>
             </>
           )}

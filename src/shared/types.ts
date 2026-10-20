@@ -18,7 +18,7 @@ export interface Agent {
   id: string; runId: string; parentId: string | null; harness: AgentHarness;
   type: AgentType; status: AgentStatus;
   sessionId?: string; threadId?: string; parentThreadId?: string;
-  model?: string; provider?: string; reasoningEffort?: string; role?: string; nickname?: string; agentPath?: string;
+  model?: string; provider?: string; reasoningEffort?: string; role?: string; nickname?: string; description?: string; agentPath?: string;
   cwd?: string; tracePath?: string; createdAt?: number; lastActivityAt?: number; activity?: string;
   tokenUsage?: ModelTokenUsage[];
   tokenTimeline?: { timestamp: number; inputTokens: number; outputTokens: number }[];
