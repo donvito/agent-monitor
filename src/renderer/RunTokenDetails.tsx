@@ -4,6 +4,7 @@ import type { Agent } from '../shared/types';
 import { estimateAgentCost, estimateModelCosts, PRICING_VERIFIED_AT, UNATTRIBUTED_MODEL, type ModelCostRow } from '../shared/pricing';
 import { RollingNumber, RollingText } from './RollingNumber';
 import { TokenUsageCharts } from './TokenUsageCharts';
+import { cacheUse, type CacheUse } from './cacheUse';
 
 const exact = (value: number) => value.toLocaleString();
 
@@ -17,6 +18,18 @@ function share(part: number, whole: number) {
   if (!whole) return '0%';
   const percent = part / whole * 100;
   return `${percent > 0 && percent < 0.1 ? '<0.1' : percent.toFixed(1)}%`;
+}
+
+const compact = (value: number) => value.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 2 });
+
+/** Share of input read from or written to the cache, or a dash when the logs do not say. */
+function cacheShare(part: number | undefined, input: number) {
+  return part === undefined ? '—' : share(part, input);
+}
+
+function cacheNote(cache: CacheUse) {
+  if (cache.read === undefined) return 'These logs do not record cache use';
+  return `${compact(cache.read)} read · ${cache.write === undefined ? 'writes not logged' : `${compact(cache.write)} written`}`;
 }
 
 const rate = (value: number) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
@@ -57,6 +70,8 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
   const [view, setView] = useState<'agent' | 'model'>('agent');
   const modelRows = useMemo(() => estimateModelCosts(agents), [agents]);
   const titleId = useId();
+  const cache = useMemo(() => cacheUse(agents), [agents]);
+  const agentCache = useMemo(() => new Map(agents.map((agent) => [agent.id, cacheUse([agent])])), [agents]);
   const totals = agents.reduce((sum, agent) => ({
     input: sum.input + agent.stats.inputTokens,
     output: sum.output + agent.stats.outputTokens,
@@ -145,6 +160,11 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
             <strong><RollingNumber value={totalTokens} /></strong>
             <small>Across {agents.length} {agents.length === 1 ? 'agent' : 'agents'}</small>
           </div>
+          <div className="token-breakdown__tile token-breakdown__tile--cache" title="Share of input tokens read from the prompt cache. Written tokens were stored in the cache for later requests; both are part of input.">
+            <span>Cache use</span>
+            <strong>{cacheShare(cache.read, cache.input)}</strong>
+            <small>{cacheNote(cache)}</small>
+          </div>
           <div className="token-breakdown__tile token-breakdown__tile--cost" title={`${totalCostLabel}. ${totalCostNote}`}>
             <span>Estimated cost</span>
             <strong><RollingText text={totalCost.knownUsd > 0 ? usdShort(totalCost.knownUsd) : totalCostLabel} /></strong>
@@ -163,12 +183,12 @@ export function RunTokenDetails({ agents }: { agents: Agent[] }) {
         </div>
         <div className="token-breakdown__scroll">
           {view === 'agent' ? <table>
-            <thead><tr><th scope="col">Agent</th><th scope="col">IN</th><th scope="col">OUT</th><th scope="col" title={`API token estimate (USD). ${totalCostNote}`}>USD</th></tr></thead>
+            <thead><tr><th scope="col">Agent</th><th scope="col">IN</th><th scope="col" title="Share of the agent's input read from the prompt cache">CACHE READ</th><th scope="col" title="Share of the agent's input written to the prompt cache">CACHE WRITE</th><th scope="col">OUT</th><th scope="col" title={`API token estimate (USD). ${totalCostNote}`}>USD</th></tr></thead>
             <tbody>{rows.map(agent => <tr key={agent.id}>
               <th scope="row" title={agent.id}><strong>{agent.nickname || agent.role || (agent.type === 'main' ? 'Main agent' : `Subagent · ${agent.id.slice(-8)}`)}</strong><span>{agent.type === 'main' ? 'Main' : agent.role || 'Subagent'} · {agent.model || 'Unknown model'}</span></th>
-              <td><RollingNumber value={agent.stats.inputTokens} /></td><td><RollingNumber value={agent.stats.outputTokens} /></td><td className="token-breakdown__cost" title={costNote(costByAgentId.get(agent.id) as AgentCost)}><RollingText text={costLabel(costByAgentId.get(agent.id) as AgentCost)} /></td>
+              <td><RollingNumber value={agent.stats.inputTokens} /></td><td>{cacheShare(agentCache.get(agent.id)?.read, agent.stats.inputTokens)}</td><td>{cacheShare(agentCache.get(agent.id)?.write, agent.stats.inputTokens)}</td><td><RollingNumber value={agent.stats.outputTokens} /></td><td className="token-breakdown__cost" title={costNote(costByAgentId.get(agent.id) as AgentCost)}><RollingText text={costLabel(costByAgentId.get(agent.id) as AgentCost)} /></td>
             </tr>)}</tbody>
-            <tfoot><tr><th scope="row">Run total</th><td><RollingNumber value={totals.input} /></td><td><RollingNumber value={totals.output} /></td><td className="token-breakdown__cost" title={totalCostNote}><RollingText text={totalCostLabel} /></td></tr></tfoot>
+            <tfoot><tr><th scope="row">Run total</th><td><RollingNumber value={totals.input} /></td><td>{cacheShare(cache.read, cache.input)}</td><td>{cacheShare(cache.write, cache.input)}</td><td><RollingNumber value={totals.output} /></td><td className="token-breakdown__cost" title={totalCostNote}><RollingText text={totalCostLabel} /></td></tr></tfoot>
           </table> : <table className="token-breakdown__models">
             <thead><tr><th scope="col">Model</th><th scope="col">IN</th><th scope="col">OUT</th><th scope="col" title={`API token estimate (USD). ${totalCostNote}`}>USD</th><th scope="col">Share of cost</th></tr></thead>
             <tbody>{modelRows.map(row => {
